@@ -24,11 +24,13 @@ _data_path = None
 _cert_path = None
 
 
+# 获取根目录绝对路径Path对象
 def root_path() -> Path:
     from os.path import join, realpath
     return Path(realpath(join(__file__, "../../")))
 
 
+# 整个程序的线程池，默认线程数量为CPU*5
 def get_executor() -> ThreadPoolExecutor:
     global _shared_executor
     if _shared_executor is None:
@@ -36,6 +38,7 @@ def get_executor() -> ThreadPoolExecutor:
     return _shared_executor
 
 
+# 获取目录前缀字符串，如果为空默认为根目录绝对路径字符串
 def prefix_path() -> str:
     global _prefix_path
     if _prefix_path is None:
@@ -126,6 +129,7 @@ def get_logging_conf(conf_filename: str = 'hummingbot_logs.yml'):
         return config_dict
 
 
+# 为一个策略初始化logging配置内容
 def init_logging(conf_filename: str,
                  client_config_map: "_ClientConfigAdapter",
                  override_log_level: Optional[str] = None,
@@ -138,6 +142,7 @@ def init_logging(conf_filename: str,
     import pandas as pd
     from ruamel.yaml import YAML
 
+    # 设置log record factory和logger class
     from hummingbot.logger.struct_logger import StructLogger, StructLogRecord
     global STRUCT_LOGGER_SET
     if not STRUCT_LOGGER_SET:
@@ -148,15 +153,18 @@ def init_logging(conf_filename: str,
     # Do not raise exceptions during log handling
     logging.raiseExceptions = False
 
+    # 获取配置文件的绝对路径：/conf/xxx (如hummingbot_logs.yml)
     file_path: str = join(prefix_path(), "conf", conf_filename)
     yaml_parser: YAML = YAML()
     with open(file_path) as fd:
         yml_source: str = fd.read()
+        # 把配置文件里的$XXX替换成实际值
         yml_source = yml_source.replace("$PROJECT_DIR", prefix_path())
         yml_source = yml_source.replace("$DATETIME", pd.Timestamp.now().strftime("%Y-%m-%d-%H-%M-%S"))
         yml_source = yml_source.replace("$STRATEGY_FILE_PATH", strategy_file_path.replace(".yml", ""))
         io_stream: io.StringIO = io.StringIO(yml_source)
         config_dict: Dict = yaml_parser.load(io_stream)
+        # 覆盖log level
         if override_log_level is not None and "loggers" in config_dict:
             for logger in config_dict["loggers"]:
                 if logger in client_config_map.logger_override_whitelist:

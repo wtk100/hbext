@@ -10,6 +10,7 @@ from hummingbot.core.utils.async_retry import async_retry
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.logger import HummingbotLogger
 
+# coinalpha.com is original creators of Hummingbot
 
 class LogServerClient(NetworkBase):
     lsc_logger: Optional[HummingbotLogger] = None

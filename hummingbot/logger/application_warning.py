@@ -7,9 +7,11 @@ from typing import (
 )
 
 
+# 定义程序Warning信息的结构，用于logging
 class ApplicationWarning(NamedTuple):
     timestamp: float
     logger_name: str
+     # 文件名、行号、函数、堆栈
     caller_info: Tuple[str, int, str, Optional[str]]
     warning_msg: str
 

@@ -47,6 +47,7 @@ class UIStartListener(EventListener):
         if hb.strategy_name is not None:
             if not self._is_script:
                 write_config_to_yml(hb.strategy_config_map, hb.strategy_file_name, hb.client_config_map)
+            # 方法来自StartCommand
             hb.start(log_level=hb.client_config_map.log_level,
                      script=hb.strategy_name if self._is_script else None,
                      conf=self._script_config,

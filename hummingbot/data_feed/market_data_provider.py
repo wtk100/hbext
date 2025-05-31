@@ -38,7 +38,9 @@ class MarketDataProvider:
         self._rates_update_task = None
         self._rates_update_interval = rates_update_interval
         self._rates = {}
+        # key: connector name, value: ConnectorSetting对象
         self._rate_sources = {}
+        # key: connector name, value: List[ConnectorPair]
         self._rates_required = {}
         self.conn_settings = AllConnectorSettings.get_connector_settings()
 
@@ -63,6 +65,9 @@ class MarketDataProvider:
     def initialize_rate_sources(self, connector_pairs: List[ConnectorPair]):
         """
         Initializes a rate source based on the given connector pair.
+        初始化self._rate_sources和self._rates_required为如下字典:
+        key: connector name, value: ConnectorSetting对象
+        key: connector name, value: List[ConnectorPair]
         :param connector_pair: ConnectorPair
         """
         for connector_pair in connector_pairs:
@@ -83,8 +88,10 @@ class MarketDataProvider:
     async def update_rates_task(self):
         """
         Updates the rates for all rate sources.
+        持续从交易所获取最新成交价并更新到RateOracle类的共享实例中
         """
         while True:
+            # 是RateOracle类的共享实例
             rate_oracle = RateOracle.get_instance()
             for connector, connector_pairs in self._rates_required.items():
                 if connector == "gateway":

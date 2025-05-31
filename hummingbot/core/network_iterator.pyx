@@ -35,6 +35,7 @@ cdef class NetworkIterator(TimeIterator):
         self._check_network_interval = 10.0
         self._check_network_timeout = 5.0
         self._network_error_wait_time = 60.0
+        # asyncio task
         self._check_network_task = None
 
     @property
@@ -77,17 +78,21 @@ cdef class NetworkIterator(TimeIterator):
     def check_network_timeout(self, double timeout):
         self._check_network_timeout = timeout
 
+    # 子类需定义
     async def start_network(self):
         pass
 
+    # 子类需定义
     async def stop_network(self):
         pass
 
+    # 子类需定义
     async def check_network(self) -> NetworkStatus:
         self.logger().warning("check_network() has not been implemented!")
         return NetworkStatus.NOT_CONNECTED
 
     async def _check_network_loop(self):
+        # 注意本循环只在发生CancelledError时raise异常并退出，否则一直运行
         while True:
             last_status = self._network_status
             try:
@@ -113,11 +118,13 @@ cdef class NetworkIterator(TimeIterator):
                 await asyncio.sleep(self._network_error_wait_time)
 
 
+    # 重载父类方法，由Clock对象调用，开启网络检查循环，并调用start_network
     cdef c_start(self, Clock clock, double timestamp):
         TimeIterator.c_start(self, clock, timestamp)
         self._check_network_task = safe_ensure_future(self._check_network_loop())
         self._network_status = NetworkStatus.NOT_CONNECTED
 
+    # 重载父类方法，由Clock对象调用，停止网络检查循环，并调用stop_network
     cdef c_stop(self, Clock clock):
         TimeIterator.c_stop(self, clock)
         if self._check_network_task is not None:
@@ -125,6 +132,8 @@ cdef class NetworkIterator(TimeIterator):
             self._check_network_task = None
         self._network_status = NetworkStatus.STOPPED
         safe_ensure_future(self.stop_network())
+
+    # 注：父类TimeIterator的c_tick方法未重载
 
     def start(self, clock: Clock, timestamp: float):
         self.c_start(clock, timestamp)

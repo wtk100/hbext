@@ -7,6 +7,7 @@ from hummingbot.logger import HummingbotLogger
 from hummingbot.strategy_v2.models.base import RunnableStatus
 
 
+# 持续定时执行某个任务
 class RunnableBase(ABC):
     """
     Base class for smart components in the Hummingbot application.

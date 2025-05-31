@@ -42,6 +42,7 @@ class PositionExecutor(ExecutorBase):
         :param update_interval: The interval at which the PositionExecutor should be updated, defaults to 1.0.
         :param max_retries: The maximum number of retries for the PositionExecutor, defaults to 5.
         """
+        # 检查逾期清仓订单必须是市价单
         if config.triple_barrier_config.time_limit_order_type != OrderType.MARKET or \
                 config.triple_barrier_config.stop_loss_order_type != OrderType.MARKET:
             error = "Only market orders are supported for time_limit and stop_loss"
@@ -49,6 +50,7 @@ class PositionExecutor(ExecutorBase):
             raise ValueError(error)
         super().__init__(strategy=strategy, config=config, connectors=[config.connector_name],
                          update_interval=update_interval)
+        # 若未配置开仓价，从市场获取当前价作为开仓价                 
         if not config.entry_price:
             open_order_price_type = PriceType.BestBid if config.side == TradeType.BUY else PriceType.BestAsk
             config.entry_price = self.get_price(config.connector_name, config.trading_pair,

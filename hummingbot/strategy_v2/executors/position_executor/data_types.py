@@ -18,13 +18,15 @@ class TripleBarrierConfig(BaseModel):
     stop_loss: Optional[Decimal] = None
     take_profit: Optional[Decimal] = None
     time_limit: Optional[int] = None
-    trailing_stop: Optional[TrailingStop] = None
+    # 动态的、按回撤比例来清仓
+    trailing_stop: Optional[TrailingStop] = None 
     open_order_type: OrderType = OrderType.LIMIT
     take_profit_order_type: OrderType = OrderType.MARKET
     stop_loss_order_type: OrderType = OrderType.MARKET
     time_limit_order_type: OrderType = OrderType.MARKET
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    # 将当前对象的数量属性乘系数(volatility_factor)，返回新对象
     def new_instance_with_adjusted_volatility(self, volatility_factor: float) -> TripleBarrierConfig:
         new_trailing_stop = None
         if self.trailing_stop is not None:
@@ -49,11 +51,15 @@ class PositionExecutorConfig(ExecutorConfigBase):
     type: Literal["position_executor"] = "position_executor"
     trading_pair: str
     connector_name: str
-    side: TradeType
+    # buy/sell/range
+    side: TradeType 
     entry_price: Optional[Decimal] = None
     amount: Decimal
     triple_barrier_config: TripleBarrierConfig = TripleBarrierConfig()
     leverage: int = 1
+     # ?
     activation_bounds: Optional[List[Decimal]] = None
+     # ?
     level_id: Optional[str] = None
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    

@@ -1,3 +1,6 @@
+### 在PubSub的添加、删除、触发event_tag对应的EventListener集合的基础上，
+### 增加由Clock对象驱动的相关方法定义，包括start, stop, tick, 子类需重载; 本身会被加到Clock对象的iterators列表里
+
 # distutils: language=c++
 from typing import Optional
 
@@ -11,14 +14,17 @@ cdef class TimeIterator(PubSub):
         self._current_timestamp = NaN
         self._clock = None
 
+    # Clock对象调用
     cdef c_start(self, Clock clock, double timestamp):
         self._clock = clock
         self._current_timestamp = timestamp
 
+    # Clock对象调用
     cdef c_stop(self, Clock clock):
         self._current_timestamp = NaN
         self._clock = None
 
+    # Clock对象调用
     cdef c_tick(self, double timestamp):
         self._current_timestamp = timestamp
 

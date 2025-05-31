@@ -1,3 +1,7 @@
+#########################################################################################################
+### Executors：负责与Connector对象互动，执行V2策略产生的订单，并按配置参数跟踪管理订单
+#########################################################################################################
+
 from decimal import Decimal
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple, Union
@@ -58,6 +62,7 @@ class ExecutorBase(RunnableBase):
         self._failed_order_forwarder = SourceInfoEventForwarder(self.process_order_failed_event)
 
         # Pairs of market events and their corresponding event forwarders
+        # register_events方法会注册事件处理函数到Connector对象(其基类有PubSub)
         self._event_pairs: List[Tuple[MarketEvent, SourceInfoEventForwarder]] = [
             (MarketEvent.OrderCancelled, self._cancel_order_forwarder),
             (MarketEvent.BuyOrderCreated, self._create_buy_order_forwarder),
@@ -71,7 +76,8 @@ class ExecutorBase(RunnableBase):
     @property
     def status(self):
         """
-        Returns the status of the executor.
+        Returns the status of the executor. 
+        来自父类RunnableBase, 类型为RunnableStatus
         """
         return self._status
 
@@ -170,9 +176,10 @@ class ExecutorBase(RunnableBase):
         super().stop()
         self.unregister_events()
 
-    async def on_start(self):
+    async def on_start(self): 
         """
-        Called when the executor is started.
+        Called when the executor is started. 
+        来自基类RunnableBase.
         """
         await self.validate_sufficient_balance()
 
@@ -243,6 +250,7 @@ class ExecutorBase(RunnableBase):
         """
         return self.connectors[connector_name]._order_tracker.fetch_order(client_order_id=order_id)
 
+    # 注册Connector(基类有PubSub)触发的事件的处理函数
     def register_events(self):
         """
         Registers the events with the connectors.
@@ -251,6 +259,7 @@ class ExecutorBase(RunnableBase):
             for event_pair in self._event_pairs:
                 connector.add_listener(event_pair[0], event_pair[1])
 
+    # 取消注册Connector(基类有PubSub)触发的事件的处理函数
     def unregister_events(self):
         """
         Unregisters the events from the connectors.
@@ -305,7 +314,8 @@ class ExecutorBase(RunnableBase):
     def get_trading_rules(self, connector_name: str, trading_pair: str) -> TradingRule:
         """
         Retrieves the trading rules for the specified trading pair from the specified connector.
-
+        
+        交易规则指交易所规定的下单限, 最大、最小、步长等
         :param connector_name: The name of the connector.
         :param trading_pair: The trading pair.
         :return: The trading rules.
