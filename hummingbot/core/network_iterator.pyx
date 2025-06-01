@@ -134,7 +134,6 @@ cdef class NetworkIterator(TimeIterator):
         safe_ensure_future(self.stop_network())
 
     # 注：父类TimeIterator的c_tick方法未重载
-
     def start(self, clock: Clock, timestamp: float):
         self.c_start(clock, timestamp)
 

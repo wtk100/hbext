@@ -121,7 +121,7 @@ async def quick_start(args: argparse.Namespace, secrets_manager: BaseSecretsMana
         else:
             strategy_config = await load_strategy_config_map_from_file(
                 # /conf/strategies/xxx.yml
-                STRATEGIES_CONF_DIR_PATH / config_file_name 
+                STRATEGIES_CONF_DIR_PATH / config_file_name
             )
             hb.strategy_name = (
                 strategy_config.strategy
@@ -129,12 +129,12 @@ async def quick_start(args: argparse.Namespace, secrets_manager: BaseSecretsMana
                 else strategy_config.get("strategy").value
             )
             hb.strategy_config_map = strategy_config
-    
+
     # 检查配置项是否提供完整
     if strategy_config is not None:
         if not all_configs_complete(strategy_config, hb.client_config_map):
             # 方法来自StatusCommand，执行配置项、解密、网络等检查
-            hb.status() 
+            hb.status()
 
     # The listener needs to have a named variable for keeping reference, since the event listener system
     # uses weak references to remove unneeded listeners.
@@ -143,7 +143,7 @@ async def quick_start(args: argparse.Namespace, secrets_manager: BaseSecretsMana
     hb.app.add_listener(HummingbotUIEvent.Start, start_listener)
 
     # 来自HummingbotCLI.run
-    tasks: List[Coroutine] = [hb.run()] 
+    tasks: List[Coroutine] = [hb.run()]
     if client_config_map.debug_console:
         management_port: int = detect_available_port(8211)
         tasks.append(start_management_console(locals(), host="localhost", port=management_port))

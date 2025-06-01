@@ -76,7 +76,7 @@ class ExecutorBase(RunnableBase):
     @property
     def status(self):
         """
-        Returns the status of the executor. 
+        Returns the status of the executor.
         来自父类RunnableBase, 类型为RunnableStatus
         """
         return self._status
@@ -176,9 +176,9 @@ class ExecutorBase(RunnableBase):
         super().stop()
         self.unregister_events()
 
-    async def on_start(self): 
+    async def on_start(self):
         """
-        Called when the executor is started. 
+        Called when the executor is started.
         来自基类RunnableBase.
         """
         await self.validate_sufficient_balance()
@@ -314,7 +314,7 @@ class ExecutorBase(RunnableBase):
     def get_trading_rules(self, connector_name: str, trading_pair: str) -> TradingRule:
         """
         Retrieves the trading rules for the specified trading pair from the specified connector.
-        
+
         交易规则指交易所规定的下单限, 最大、最小、步长等
         :param connector_name: The name of the connector.
         :param trading_pair: The trading pair.

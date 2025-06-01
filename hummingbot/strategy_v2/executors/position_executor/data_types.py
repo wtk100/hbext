@@ -19,7 +19,7 @@ class TripleBarrierConfig(BaseModel):
     take_profit: Optional[Decimal] = None
     time_limit: Optional[int] = None
     # 动态的、按回撤比例来清仓
-    trailing_stop: Optional[TrailingStop] = None 
+    trailing_stop: Optional[TrailingStop] = None
     open_order_type: OrderType = OrderType.LIMIT
     take_profit_order_type: OrderType = OrderType.MARKET
     stop_loss_order_type: OrderType = OrderType.MARKET
@@ -52,7 +52,7 @@ class PositionExecutorConfig(ExecutorConfigBase):
     trading_pair: str
     connector_name: str
     # buy/sell/range
-    side: TradeType 
+    side: TradeType
     entry_price: Optional[Decimal] = None
     amount: Decimal
     triple_barrier_config: TripleBarrierConfig = TripleBarrierConfig()
