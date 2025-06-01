@@ -15,9 +15,11 @@ CENTRALIZED = True
 
 EXAMPLE_PAIR = "BTC-USDT"
 
+# ？？？
 BROKER_ID = "x-3QreWesy"
 
 
+# 加上key和secret字段
 class BinancePerpetualConfigMap(BaseConnectorConfigMap):
     connector: str = "binance_perpetual"
     binance_perpetual_api_key: SecretStr = Field(
@@ -42,6 +44,7 @@ OTHER_DOMAINS_EXAMPLE_PAIR = {"binance_perpetual_testnet": "BTC-USDT"}
 OTHER_DOMAINS_DEFAULT_FEES = {"binance_perpetual_testnet": [0.02, 0.04]}
 
 
+# testnet也是加上key和secret字段
 class BinancePerpetualTestnetConfigMap(BaseConnectorConfigMap):
     connector: str = "binance_perpetual_testnet"
     binance_perpetual_testnet_api_key: SecretStr = Field(

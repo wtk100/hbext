@@ -81,6 +81,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
     def get_sell_collateral_token(self, trading_pair: str) -> str:
         raise NotImplementedError
 
+    # 由Clock调用
     def tick(self, timestamp: float):
         """
         Includes the logic that has to be processed every time a new tick happens in the bot. Particularly it enables
@@ -92,6 +93,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
         if current_tick > last_tick:
             self._funding_fee_poll_notifier.set()
 
+    # 由Clock调用
     async def start_network(self):
         await super().start_network()
         self._perpetual_trading.start()

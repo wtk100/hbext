@@ -8,6 +8,7 @@ s_decimal_max = Decimal("1e56")
 s_decimal_min = Decimal(1) / s_decimal_max
 
 
+# 交易所的交易规则，包括各种最大、最小、步长的限制
 cdef class TradingRule:
     def __init__(self,
                  trading_pair: str,

@@ -1,3 +1,7 @@
+#########################################################################################################
+### MarketsRecorder：从connectors获取市场行情数据更新、处理订单和交易相关事件，并将数据写入数据库
+### 初始化时开启两个执行流： 1.由connector触发事件处理函数，2.从connect定时获取行情数据
+#########################################################################################################
 import asyncio
 import json
 import logging
@@ -97,6 +101,7 @@ class MarketsRecorder:
             exchange_order_ids = self.get_orders_for_config_and_market(self._config_file_path, market, True, 2000)
             market.add_exchange_order_ids_from_market_recorder({o.exchange_order_id: o.id for o in exchange_order_ids})
 
+        # 定义一系列事件的处理函数
         self._create_order_forwarder: SourceInfoEventForwarder = SourceInfoEventForwarder(self._did_create_order)
         self._fill_order_forwarder: SourceInfoEventForwarder = SourceInfoEventForwarder(self._did_fill_order)
         self._cancel_order_forwarder: SourceInfoEventForwarder = SourceInfoEventForwarder(self._did_cancel_order)
@@ -110,6 +115,7 @@ class MarketsRecorder:
         self._close_range_position_forwarder: SourceInfoEventForwarder = SourceInfoEventForwarder(
             self._did_close_position)
 
+        # 定义事件和处理函数的Map
         self._event_pairs: List[Tuple[MarketEvent, SourceInfoEventForwarder]] = [
             (MarketEvent.BuyOrderCreated, self._create_order_forwarder),
             (MarketEvent.SellOrderCreated, self._create_order_forwarder),
@@ -130,18 +136,22 @@ class MarketsRecorder:
     def _start_market_data_recording(self):
         self._market_data_collection_task = self._ev_loop.create_task(self._record_market_data())
 
+    # 持续更新报价和订单簿并保存数据库
     async def _record_market_data(self):
         while True:
             try:
+                # 要求connector全部ready
                 if all(ex.ready for ex in self._markets):
                     with self._sql_manager.get_new_session() as session:
                         with session.begin():
                             for market in self._markets:
                                 exchange = market.display_name
                                 for trading_pair in market.trading_pairs:
+                                    # market.get_price_by_type方法在ExchangeBase定义
                                     mid_price = market.get_price_by_type(trading_pair, PriceType.MidPrice)
                                     best_bid = market.get_price_by_type(trading_pair, PriceType.BestBid)
                                     best_ask = market.get_price_by_type(trading_pair, PriceType.BestAsk)
+                                    # market.get_order_book方法在ExchangeBase定义
                                     order_book = market.get_order_book(trading_pair)
                                     depth = self._market_data_collection_config.market_data_collection_depth + 1
                                     market_data = MarketData(
@@ -179,9 +189,12 @@ class MarketsRecorder:
     def db_timestamp(self) -> int:
         return int(time.time() * 1e3)
 
+    # 开启两个执行流： 1.由connector触发事件处理函数，2._start_market_data_recording定时任务
     def start(self):
+        # 给connector加上事件处理函数
         for market in self._markets:
             for event_pair in self._event_pairs:
+                # add_listener由PubSub类定义
                 market.add_listener(event_pair[0], event_pair[1])
         if self._market_data_collection_config.market_data_collection_enabled:
             self._start_market_data_recording()
@@ -267,6 +280,7 @@ class MarketsRecorder:
             else:
                 return query.limit(number_of_rows).all()
 
+    # 把connector的tracking_states保存到数据库
     def save_market_states(self, config_file_path: str, market: ConnectorBase, session: Session):
         market_states: Optional[MarketState] = self.get_market_states(config_file_path, market, session=session)
         timestamp: int = self.db_timestamp
@@ -281,6 +295,7 @@ class MarketsRecorder:
                                         saved_state=market.tracking_states)
             session.add(market_states)
 
+    # 从数据库恢复connector的tracking_state
     def restore_market_states(self, config_file_path: str, market: ConnectorBase):
         with self._sql_manager.get_new_session() as session:
             market_states: Optional[MarketState] = self.get_market_states(config_file_path, market, session=session)
@@ -299,6 +314,7 @@ class MarketsRecorder:
         market_states: Optional[MarketState] = query.one_or_none()
         return market_states
 
+    # 将订单创建事件的结果保存数据库
     def _did_create_order(self,
                           event_tag: int,
                           market: ConnectorBase,
@@ -337,6 +353,10 @@ class MarketsRecorder:
                 market.add_exchange_order_ids_from_market_recorder({evt.exchange_order_id: evt.order_id})
                 self.save_market_states(self._config_file_path, market, session=session)
 
+    # 将订单成交事件的结果保存数据库，数据更新包括
+    # 1. 更新订单Order记录的状态
+    # 2. 新增OrderStatus记录
+    # 3. 新增TradeFill记录
     def _did_fill_order(self,
                         event_tag: int,
                         market: ConnectorBase,
@@ -401,6 +421,7 @@ class MarketsRecorder:
                                                                                    trade_fill_record.exchange_trade_id,
                                                                                    trade_fill_record.symbol)})
 
+    # 将Funding支付事件的结果保存数据库
     def _did_complete_funding_payment(self,
                                       event_tag: int,
                                       market: ConnectorBase,
@@ -430,6 +451,7 @@ class MarketsRecorder:
         df = pd.read_csv(file_path, header=None)
         return tuple(df.iloc[0].values) == header
 
+    # 将交易记录写入/data目录下的CSV文件(trades_开头)
     def append_to_csv(self, trade: TradeFill):
         csv_filename = "trades_" + trade.config_file_path[:-4] + ".csv"
         csv_path = os.path.join(data_path(), csv_filename)
@@ -438,12 +460,14 @@ class MarketsRecorder:
         field_data = tuple(getattr(trade, attr) for attr in field_names)
 
         # adding extra field "age"
+        # 即成交时间减订单创建时间
         # // indicates order is a paper order so 'n/a'. For real orders, calculate age.
         age = pd.Timestamp(int((trade.timestamp * 1e-3) - (trade.order.creation_timestamp * 1e-3)), unit='s').strftime(
             '%H:%M:%S') if (trade.order is not None and "//" not in trade.order_id) else "n/a"
         field_names += ("age",)
         field_data += (age,)
 
+        # 若/data目录下交易记录文件存在，则将其Archive(文件名加_old....)
         if (os.path.exists(csv_path) and (not self._csv_matches_header(csv_path, field_names))):
             move(csv_path, csv_path[:-4] + '_old_' + pd.Timestamp.utcnow().strftime("%Y%m%d-%H%M%S") + ".csv")
 
@@ -453,6 +477,9 @@ class MarketsRecorder:
         df = pd.DataFrame([field_data])
         df.to_csv(csv_path, mode='a', header=False, index=False)
 
+    # 将订单状态变更事件的结果保存数据库，数据更新包括
+    # 1. 更新订单Order记录的状态
+    # 2. 新增OrderStatus记录
     def _update_order_status(self,
                              event_tag: int,
                              market: ConnectorBase,
@@ -506,6 +533,7 @@ class MarketsRecorder:
                           evt: OrderExpiredEvent):
         self._update_order_status(event_tag, market, evt)
 
+    # 将range position变更事件的结果RangePositionUpdate保存数据库
     def _did_update_range_position(self,
                                    event_tag: int,
                                    connector: ConnectorBase,
@@ -526,6 +554,7 @@ class MarketsRecorder:
                 session.add(rp_update)
                 self.save_market_states(self._config_file_path, connector, session=session)
 
+    # 将range position关闭事件的结果RangePositionCollectedFees保存数据库
     def _did_close_position(self,
                             event_tag: int,
                             connector: ConnectorBase,

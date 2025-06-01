@@ -47,9 +47,12 @@ cdef class ConnectorBase(NetworkIterator):
     def __init__(self, client_config_map: "ClientConfigAdapter"):
         super().__init__()
 
+        # EventListener
         self._event_reporter = EventReporter(event_source=self.display_name)
+        # EventListener
         self._event_logger = EventLogger(event_source=self.display_name)
         for event_tag in self.MARKET_EVENTS:
+            # c_add_listener为基类PubSub定义的方法
             self.c_add_listener(event_tag.value, self._event_reporter)
             self.c_add_listener(event_tag.value, self._event_logger)
 
@@ -65,6 +68,7 @@ cdef class ConnectorBase(NetworkIterator):
         self._current_trade_fills = set()
         self._exchange_order_ids = dict()
         self._trade_fee_schema = None
+        # 向hummingbot基金会报告交易量的对象
         self._trade_volume_metric_collector = client_config_map.anonymized_metrics_mode.get_collector(
             connector=self,
             rate_provider=RateOracle.get_instance(),
@@ -108,6 +112,7 @@ cdef class ConnectorBase(NetworkIterator):
     def split_trading_pair(trading_pair: str) -> Tuple[str, str]:
         return split_hb_trading_pair(trading_pair)
 
+    # 获得在途订单中的资产余额
     def in_flight_asset_balances(self, in_flight_orders: Dict[str, InFlightOrderBase]) -> Dict[str, Decimal]:
         """
         Calculates total asset balances locked in in_flight_orders including fee (estimated)
@@ -119,44 +124,54 @@ cdef class ConnectorBase(NetworkIterator):
         asset_balances = {}
         if in_flight_orders is None:
             return asset_balances
+        # 注: BTC/USDT中，BTC是base asset, USDT是quote asset，用quote买base，base卖出得到quote
         for order in (o for o in in_flight_orders.values() if not (o.is_done or o.is_failure or o.is_cancelled)):
             outstanding_amount = order.amount - order.executed_amount_base
             if order.trade_type is TradeType.BUY:
                 outstanding_value = outstanding_amount * order.price
                 if order.quote_asset not in asset_balances:
                     asset_balances[order.quote_asset] = s_decimal_0
+                # 要付的fee也在途，需加回来
                 fee = self.estimate_fee_pct(True)
                 outstanding_value *= Decimal(1) + fee
+                # 买单还没成交，在途资产仍用quote asset表示
                 asset_balances[order.quote_asset] += outstanding_value
             else:
                 if order.base_asset not in asset_balances:
                     asset_balances[order.base_asset] = s_decimal_0
+                # 卖单还没成交，在途资产仍用base asset表示
                 asset_balances[order.base_asset] += outstanding_amount
         return asset_balances
 
+    # 获得订单成交后的各资产余额变动量
     def order_filled_balances(self, starting_timestamp = 0) -> Dict[str, Decimal]:
         """
         Calculates total asset balance changes from filled orders since the timestamp
         For BUY filled order, the quote balance goes down while the base balance goes up, and for SELL order, it's the
         opposite. This does not account for fee.
+        注: 只考虑计算资产余额的变更, 所以从已成交订单中取出相应资产变动数量即可, 不用考虑fee
         :param starting_timestamp: The starting timestamp to include filter order filled events
         :returns A dictionary of tokens and their balance
         """
+        # 获取已成交订单事件集合
         order_filled_events = list(filter(lambda e: isinstance(e, OrderFilledEvent), self.event_logs))
         order_filled_events = [o for o in order_filled_events if o.timestamp > starting_timestamp]
         balances = {}
         for event in order_filled_events:
             base, quote = event.trading_pair.split("-")[0], event.trading_pair.split("-")[1]
             if event.trade_type is TradeType.BUY:
+                # 买单成交，quote asset减，base asset增
                 quote_value = Decimal("-1") * event.price * event.amount
                 base_value = event.amount
             else:
+                # 卖单成交，quote asset增，base asset减
                 quote_value = event.price * event.amount
                 base_value = Decimal("-1") * event.amount
             if base not in balances:
                 balances[base] = s_decimal_0
             if quote not in balances:
                 balances[quote] = s_decimal_0
+            # 变动量汇总
             balances[base] += base_value
             balances[quote] += quote_value
         return balances
@@ -209,24 +224,29 @@ cdef class ConnectorBase(NetworkIterator):
         """
         pass
 
+    # 需要子类重载实现
     def tick(self, timestamp: float):
         """
         Is called automatically by the clock for each clock's tick (1 second by default).
         """
         pass
 
+    # 由Clock调用
     cdef c_tick(self, double timestamp):
         NetworkIterator.c_tick(self, timestamp)
         self.tick(timestamp)
         self._trade_volume_metric_collector.process_tick(timestamp)
 
+    # 由Clock调用
     cdef c_start(self, Clock clock, double timestamp):
         self.start(clock=clock, timestamp=timestamp)
 
+    # 需要子类重载实现
     def start(self, Clock clock, double timestamp):
         NetworkIterator.c_start(self, clock, timestamp)
         self._trade_volume_metric_collector.start()
 
+    # 由Clock调用，需要子类重载实现
     cdef c_stop(self, Clock clock):
         NetworkIterator.c_stop(self, clock)
         self._trade_volume_metric_collector.stop()
@@ -373,6 +393,7 @@ cdef class ConnectorBase(NetworkIterator):
         """
         return self._account_balances.get(currency, s_decimal_0)
 
+    # 给可用余额加上上限
     def apply_balance_limit(self, currency: str, available_balance: Decimal, limit: Decimal) -> Decimal:
         """
         Apply budget limit on an available balance, the limit is calculated as followings:
@@ -405,6 +426,7 @@ cdef class ConnectorBase(NetworkIterator):
         in_flight_bal = self.in_flight_asset_balances(self.in_flight_orders).get(currency, s_decimal_0)
         orders_filled_bal = self.order_filled_balances(self._in_flight_orders_snapshot_timestamp).get(currency,
                                                                                                       s_decimal_0)
+        # 逻辑重点是“可用”，为账户当前可用余额，加放到订单里用来下单的余额，减尚未成交的余额(继续占用) ，加已经成交的余额                                                                                                    
         actual_available = available_balance + snapshot_bal - in_flight_bal + orders_filled_bal
         return actual_available
 
@@ -418,9 +440,12 @@ cdef class ConnectorBase(NetworkIterator):
         :param currency: The currency (token) name
         :returns: Balance available for trading for the specified currency
         """
+        # 当前余额
         available_balance = self._account_available_balances.get(currency, s_decimal_0)
+        # 考虑订单活动对额影响
         if not self._real_time_balance_update:
             available_balance = self.apply_balance_update_since_snapshot(currency, available_balance)
+        # 获取配置的单币种可用余额上限并按上限调整可用余额
         balance_limits = self.get_exchange_limit_config(self.name)
         if currency in balance_limits:
             balance_limit = Decimal(str(balance_limits[currency]))
@@ -440,24 +465,29 @@ cdef class ConnectorBase(NetworkIterator):
         """
         raise NotImplementedError
 
+     # quantum=step
     cdef object c_get_order_price_quantum(self, str trading_pair, object price):
         return self.get_order_price_quantum(trading_pair, price)
 
+     # quantum=step
     def get_order_price_quantum(self, trading_pair: str, price: Decimal) -> Decimal:
         """
         Returns a price step, a minimum price increment for a given trading pair.
         """
         raise NotImplementedError
 
+     # quantum=step
     cdef object c_get_order_size_quantum(self, str trading_pair, object order_size):
         return self.get_order_size_quantum(trading_pair, order_size)
 
+     # quantum=step
     def get_order_size_quantum(self, trading_pair: str, order_size: Decimal) -> Decimal:
         """
         Returns an order amount step, a minimum amount increment for a given trading pair.
         """
         raise NotImplementedError
 
+    # 价格考虑price step抹零
     cdef object c_quantize_order_price(self, str trading_pair, object price):
         if price.is_nan():
             return price
@@ -470,6 +500,7 @@ cdef class ConnectorBase(NetworkIterator):
         """
         return self.c_quantize_order_price(trading_pair, price)
 
+    # 数量考虑amount step抹零
     cdef object c_quantize_order_amount(self, str trading_pair, object amount, object price=s_decimal_NaN):
         order_size_quantum = self.c_get_order_size_quantum(trading_pair, amount)
         return (amount // order_size_quantum) * order_size_quantum

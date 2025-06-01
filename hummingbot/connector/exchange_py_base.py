@@ -244,6 +244,7 @@ class ExchangePyBase(ExchangeBase, ABC):
             raise ValueError(f"No order book exists for '{trading_pair}'.")
         return self.order_book_tracker.order_books[trading_pair]
 
+    # 由Clock调用
     def tick(self, timestamp: float):
         """
         Includes the logic that has to be processed every time a new tick happens in the bot. Particularly it enables
@@ -657,6 +658,7 @@ class ExchangePyBase(ExchangeBase, ABC):
     #
     web_utils = None
 
+    # 在父类NetworkIterator的c_start中定义了由Clock调用
     async def start_network(self):
         """
         Start all required tasks to update the status of the connector. Those tasks include:
@@ -675,6 +677,7 @@ class ExchangePyBase(ExchangeBase, ABC):
             self._user_stream_event_listener_task = safe_ensure_future(self._user_stream_event_listener())
             self._lost_orders_update_task = safe_ensure_future(self._lost_orders_update_polling_loop())
 
+    # 在父类NetworkIterator的c_stop中定义了由Clock调用
     async def stop_network(self):
         """
         This function is executed when the connector is stopped. It perform a general cleanup and stops all background
@@ -682,6 +685,7 @@ class ExchangePyBase(ExchangeBase, ABC):
         """
         self._stop_network()
 
+    # 在父类NetworkIterator中定义了在start_network中调用
     async def check_network(self) -> NetworkStatus:
         """
         Checks connectivity with the exchange using the API

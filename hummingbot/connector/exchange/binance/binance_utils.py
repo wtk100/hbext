@@ -38,6 +38,7 @@ def is_exchange_information_valid(exchange_info: Dict[str, Any]) -> bool:
     return is_trading and is_spot
 
 
+# 除connector名称外，添加API的key和secret字段
 class BinanceConfigMap(BaseConnectorConfigMap):
     connector: str = "binance"
     binance_api_key: SecretStr = Field(
