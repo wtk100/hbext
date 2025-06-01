@@ -57,6 +57,7 @@ class PriceType(Enum):
 class TradeType(Enum):
     BUY = 1
     SELL = 2
+    # 区间期权衍生品（Range Option，雪球）
     RANGE = 3
 
 

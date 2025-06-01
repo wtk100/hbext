@@ -104,6 +104,7 @@ class AsyncCallScheduler:
             except Exception:
                 self.logger().error("Scheduler sleep interrupted.", exc_info=True)
 
+    # 把coro放到主线程的event loop里执行
     async def schedule_async_call(self,
                                   coro: Coroutine,
                                   timeout_seconds: float,
@@ -115,6 +116,7 @@ class AsyncCallScheduler:
             self.start()
         return await fut
 
+    # 把func放到程序的线程池里执行并生成一个coro，然后通过主线程的event loop执行
     async def call_async(self,
                          func: Callable, *args,
                          timeout_seconds: float = 5.0,

@@ -29,32 +29,40 @@ class TradingPairFetcher:
     def __init__(self, client_config_map: ClientConfigAdapter):
         self.ready = False
         self.trading_pairs: Dict[str, Any] = {}
+        # default: False
         self.fetch_pairs_from_all_exchanges = client_config_map.hb_config.fetch_pairs_from_all_exchanges
         self._fetch_task = safe_ensure_future(self.fetch_all(client_config_map))
 
+    # 启动从单个ConnectorSetting对象获取币对，被fetch_all调用
     def _fetch_pairs_from_connector_setting(
             self,
             connector_setting: ConnectorSetting,
             connector_name: Optional[str] = None):
         connector_name = connector_name or connector_setting.name
         connector = connector_setting.non_trading_connector_instance_with_default_configuration()
+        # all_trading_pairs()是ConnectorBase的虚拟方法，由ExchangeBase实现
         safe_ensure_future(self.call_fetch_pairs(connector.all_trading_pairs(), connector_name))
 
+    # 启动从所有ConnectorSetting对象获取币对，被init调用
     async def fetch_all(self, client_config_map: ClientConfigAdapter):
         await Security.wait_til_decryption_done()
+        # 从AllConnectorSettings中获取所有ConnectorSetting对象
         connector_settings = self._all_connector_settings()
         for conn_setting in connector_settings.values():
             # XXX(martin_kou): Some connectors, e.g. uniswap v3, aren't completed yet. Ignore if you can't find the
             # data source module for them.
             try:
+                # 若是paper trade的ConnectorSetting对象，则从其父ConnectorSetting对象获取币对
                 if conn_setting.base_name().endswith("paper_trade"):
                     self._fetch_pairs_from_connector_setting(
                         connector_setting=connector_settings[conn_setting.parent_name],
                         connector_name=conn_setting.name
                     )
+                # 若不要求从所有交易所获取币对，那么若当前connector没连接过就跳过
                 elif not self.fetch_pairs_from_all_exchanges:
                     if conn_setting.connector_connected():
                         self._fetch_pairs_from_connector_setting(connector_setting=conn_setting)
+                # 若要求从所有交易所获取币对，则从当前ConnectorSetting对象获取币对
                 else:
                     self._fetch_pairs_from_connector_setting(connector_setting=conn_setting)
             except ModuleNotFoundError:

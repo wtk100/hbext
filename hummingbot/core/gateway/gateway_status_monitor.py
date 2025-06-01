@@ -21,6 +21,7 @@ class GatewayStatus(Enum):
     OFFLINE = 2
 
 
+# 网关连通性Monitor
 class GatewayStatusMonitor:
     _monitor_task: Optional[asyncio.Task]
     _gateway_status: GatewayStatus
@@ -81,15 +82,18 @@ class GatewayStatusMonitor:
             await asyncio.sleep(POLL_INTERVAL)
             max_tries = max_tries - 1
 
+    # 定时ping网关检查连接
     async def _monitor_loop(self):
         while True:
             try:
                 gateway_http_client = self._get_gateway_instance()
                 if await asyncio.wait_for(gateway_http_client.ping_gateway(), timeout=POLL_TIMEOUT):
+                    # ping通
                     if self.gateway_status is GatewayStatus.OFFLINE:
                         gateway_connectors = await gateway_http_client.get_connectors(fail_silently=True)
                         GATEWAY_CONNECTORS.clear()
                         GATEWAY_CONNECTORS.extend([connector["name"] for connector in gateway_connectors.get("connectors", [])])
+                        # 获取和更新gateway config keys
                         await self.update_gateway_config_key_list()
 
                     self._gateway_status = GatewayStatus.ONLINE
@@ -122,9 +126,11 @@ class GatewayStatusMonitor:
         try:
             config_list: List[str] = []
             config_dict: Dict[str, Any] = await self._fetch_gateway_configs()
+            # 把dict里的key全部提取到list，包括组装嵌套层级的key
             build_config_namespace_keys(config_list, config_dict)
 
             self.gateway_config_keys = config_list
+            # 初始化completer对象
             self._app.app.input_field.completer = load_completer(self._app)
         except Exception:
             self.logger().error("Error fetching gateway configs. Please check that Gateway service is online. ",

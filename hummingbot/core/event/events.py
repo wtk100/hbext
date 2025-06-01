@@ -1,3 +1,6 @@
+### 本文件定义程序的各种Event
+### 三种定义方式：继承Enum, 继承NamedTuple, 带@dataclass的普通class
+### Enum Event的int值就是event_tag， EventListener、PubSub等类会用其管理对应的事件集合
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
@@ -205,14 +208,22 @@ class OrderFilledEvent(NamedTuple):
         if execution_type != "TRADE":
             raise ValueError(f"Invalid execution type '{execution_type}'.")
         return OrderFilledEvent(
+            # timestamp
             execution_report["E"] * 1e-3,
+            # order id
             execution_report["c"],
+            # trading pair
             execution_report["s"],
             TradeType.BUY if execution_report["S"] == "BUY" else TradeType.SELL,
+            # order type
             OrderType[execution_report["o"]],
+            # price
             Decimal(execution_report["L"]),
+            # amount
             Decimal(execution_report["l"]),
+            # token & amount
             AddedToCostTradeFee(flat_fees=[TokenAmount(execution_report["N"], Decimal(execution_report["n"]))]),
+            # exchange trade id
             exchange_trade_id=execution_report["t"],
         )
 
@@ -245,6 +256,7 @@ class SellOrderCreatedEvent:
     position: Optional[str] = PositionAction.NIL.value
 
 
+# Range: 区间期权衍生品（Range Option，雪球）
 @dataclass
 class RangePositionLiquidityAddedEvent:
     timestamp: float
@@ -328,6 +340,7 @@ class LimitOrderStatus(Enum):
 class PositionModeChangeEvent:
     timestamp: float
     trading_pair: str
+    # hedge/oneway
     position_mode: PositionMode
     message: Optional[str] = None
 
@@ -345,7 +358,9 @@ class PositionUpdateEvent:
     timestamp: float
     trading_pair: str
     position_side: Optional[PositionSide]  # None if the event is for a closed position
+    # 浮动盈亏
     unrealized_pnl: Decimal
+    # 开仓价格
     entry_price: Decimal
     amount: Decimal
     leverage: Decimal

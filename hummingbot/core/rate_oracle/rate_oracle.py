@@ -1,3 +1,6 @@
+#########################################################################################################
+### 持续获取币对的汇率，即最新成交价，默认从Binance获取
+#########################################################################################################
 import asyncio
 import logging
 from decimal import Decimal
@@ -67,6 +70,7 @@ class RateOracle(NetworkBase):
 
     def __init__(self, source: Optional[RateSourceBase] = None, quote_token: Optional[str] = None):
         super().__init__()
+        # source默认为BinanceRateSource，即BinanceExchange
         self._source: RateSourceBase = source if source is not None else BinanceRateSource()
         self._prices: Dict[str, Decimal] = {}
         self._fetch_price_task: Optional[asyncio.Task] = None

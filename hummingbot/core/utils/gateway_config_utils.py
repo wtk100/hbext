@@ -128,6 +128,7 @@ def build_config_dict_display(lines: List[str], config_dict: Dict[str, Any], lev
             lines.append(f"{prefix}{k}: {v}")
 
 
+# 把dict里的key全部提取到list，key按嵌套层级组装
 def build_config_namespace_keys(namespace_keys: List[str], config_dict: Dict[str, Any], prefix: str = ""):
     """
     Build namespace keys for a config dictionary, this function is recursive.

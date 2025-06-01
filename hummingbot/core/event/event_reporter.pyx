@@ -3,6 +3,7 @@ from typing import Optional
 import dataclasses
 from hummingbot.core.event.event_listener cimport EventListener
 
+# event reporter logger，记录事件对象转成的事件字典
 er_logger = None
 
 cdef class EventReporter(EventListener):
@@ -22,13 +23,16 @@ cdef class EventReporter(EventListener):
 
     cdef c_call(self, object event_object):
         try:
+            # 事件对象转事件字典
             if dataclasses.is_dataclass(event_object):
                 event_dict = dataclasses.asdict(event_object)
             else:
                 event_dict = event_object._asdict()
 
+            # 事件字典加名称和源
             event_dict.update({"event_name": event_object.__class__.__name__,
                                "event_source": self.event_source})
+            # 把事件字典添加到logger
             self.logger().event_log(event_dict)
         except Exception:
             self.logger().error("Error logging events.", exc_info=True)

@@ -1,3 +1,7 @@
+/*
+自定义类PyRef，用于管理PyOject对象的引用，用于PubSub类移除dead listener.
+*/
+
 #ifndef _PYREF_H
 #define _PYREF_H
 
@@ -19,6 +23,7 @@ class PyRef {
 };
 
 
+// 定义获取PyObject的hash值的函数
 namespace std {
     template <>
     struct hash<PyRef>
