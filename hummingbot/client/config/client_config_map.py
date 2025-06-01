@@ -1,3 +1,4 @@
+### 定义整个应用的所有基础配置项 ###
 import json
 import random
 import re
@@ -656,6 +657,7 @@ class ClientConfigMap(BaseClientModel):
         default=DEFAULT_LOG_FILE_PATH,
         json_schema_extra={"prompt": lambda cm: "Where would you like to save your logs? (default 'logs/hummingbot_logs.log')"},
     )
+    # 是否启用止盈止损模式(盈亏比例达到即停止本应用)
     kill_switch_mode: Union[tuple(KILL_SWITCH_MODES.values())] = Field(
         default=KillSwitchDisabledMode(),
         json_schema_extra={"prompt": lambda cm: f"Select the desired kill-switch mode ({'/'.join(list(KILL_SWITCH_MODES.keys()))})"},
@@ -700,6 +702,7 @@ class ClientConfigMap(BaseClientModel):
                      "\n    USDT: 1000"),
         json_schema_extra={"prompt": lambda cm: "Use the `balance limit` command e.g. balance limit [EXCHANGE] [ASSET] [AMOUNT]"},
     )
+    # ??
     manual_gas_price: Decimal = Field(
         default=Decimal("50"),
         description="Fixed gas price (in Gwei) for Ethereum transactions",
@@ -717,6 +720,7 @@ class ClientConfigMap(BaseClientModel):
         json_schema_extra={"prompt": lambda cm: "Where would you like to save certificates that connect your bot to Gateway? (default 'certs')"},
     )
 
+    # 向hummingbot foundation匿名报告成交量的配置
     anonymized_metrics_mode: Union[tuple(METRICS_MODES.values())] = Field(
         default=AnonymizedMetricsEnabledMode(),
         description="Whether to enable aggregated order and trade data collection",
@@ -735,15 +739,18 @@ class ClientConfigMap(BaseClientModel):
                      "\nDefine abbreviations for often used commands"
                      "\nor batch grouped commands together"),
     )
+    # 从哪个交易所获取rate oracle(币的汇率)的配置
     rate_oracle_source: Union[tuple(RATE_SOURCE_MODES.values())] = Field(
         default=BinanceRateSourceMode(),
         description=f"A source for rate oracle, currently {', '.join(RATE_SOURCE_MODES.keys())}",
         json_schema_extra={"prompt": lambda cm: f"Select the desired rate oracle source ({'/'.join(RATE_SOURCE_MODES.keys())})"},
     )
+    # 用于显示各币种价值的基础币
     global_token: GlobalTokenConfigMap = Field(
         default=GlobalTokenConfigMap(),
         description="A universal token which to display tokens values in, e.g. USD,EUR,BTC"
     )
+    # 分配给本instance的API Call限制的比例
     rate_limits_share_pct: Decimal = Field(
         default=Decimal("100"),
         description=("Percentage of API rate limits (on any exchange and any end point) allocated to this bot instance."
@@ -757,8 +764,10 @@ class ClientConfigMap(BaseClientModel):
         )},
     )
     commands_timeout: CommandsTimeoutConfigMap = Field(default=CommandsTimeoutConfigMap())
+    # 表格的格式化样式
     tables_format: ClientConfigEnum(
         value="TabulateFormats",  # noqa: F821
+        # 来自tabulate库
         names={e: e for e in tabulate_formats},
         type=str,
     ) = Field(
@@ -768,8 +777,11 @@ class ClientConfigMap(BaseClientModel):
             "What tabulate formatting to apply to the tables? [https://github.com/astanin/python-tabulate#table-format]"
         )}
     )
+    # Paper trade各币种余额的配置
     paper_trade: PaperTradeConfigMap = Field(default=PaperTradeConfigMap())
+    # UI各元素颜色的配置
     color: ColorConfigMap = Field(default=ColorConfigMap())
+    # 策略运行频率的配置
     tick_size: float = Field(
         default=1.0,
         ge=0.1,
@@ -780,6 +792,7 @@ class ClientConfigMap(BaseClientModel):
             "What tick size (in seconds) do you want to use? (Enter 0.5 to indicate 0.5 seconds)"
         )},
     )
+    # 市场数据收集的配置
     market_data_collection: MarketDataCollectionConfigMap = Field(default=MarketDataCollectionConfigMap())
     model_config = ConfigDict(title="client_config_map")
 

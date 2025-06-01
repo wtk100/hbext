@@ -67,6 +67,7 @@ class StatusCommand:
 
         return "\n".join(lines)
 
+    # 获取strategy状态描述文本
     async def strategy_status(self, live: bool = False):
         active_paper_exchanges = [exchange for exchange in self.markets.keys() if exchange.endswith("paper_trade")]
 
@@ -125,9 +126,12 @@ class StatusCommand:
 
         if self.strategy is not None:
             if live:
+                # 方法来自SillyCommands, 设置HummingbotCLI对象的live_updates属性为false
                 await self.stop_live_update()
                 self.app.live_updates = True
+                # 持续异步更新策略状态
                 while self.app.live_updates and self.strategy:
+                    # 方法来自SillyCommands
                     await self.cls_display_delay(
                         await self.strategy_status(live=True) + "\n\n Press escape key to stop update.", 0.1
                     )
@@ -139,14 +143,17 @@ class StatusCommand:
 
         # Preliminary checks.
         self.notify("\nPreliminary checks:")
+        # 检查策略名称或策略文件是否提供
         if self.strategy_name is None or self.strategy_file_name is None:
             self.notify('  - Strategy check: Please import or create a strategy.')
             return False
 
+        # 检查解密操作是否完成
         if not Security.is_decryption_done():
             self.notify('  - Security check: Encrypted files are being processed. Please wait and try again later.')
             return False
 
+        # 检查StrategyConfigMap的必须配置项是否提供完整
         missing_configs = self.missing_configurations_legacy()
         if missing_configs:
             self.notify("  - Strategy check: Incomplete strategy configuration. The following values are missing.")
@@ -155,6 +162,7 @@ class StatusCommand:
         elif notify_success:
             self.notify('  - Strategy check: All required parameters confirmed.')
 
+        # 检查connectors网络连通性
         network_timeout = float(self.client_config_map.commands_timeout.other_commands_timeout)
         try:
             invalid_conns = await asyncio.wait_for(self.validate_required_connections(), network_timeout)
@@ -171,11 +179,13 @@ class StatusCommand:
         if invalid_conns or missing_configs:
             return False
 
+        # 检查connectors是否可以开始交易
         loading_markets: List[ConnectorBase] = []
         for market in self.markets.values():
             if not market.ready:
                 loading_markets.append(market)
 
+        # 有connectors尚未准备好交易
         if len(loading_markets) > 0:
             self.notify("  - Connectors check:  Waiting for connectors "
                         f"{','.join([m.name.capitalize() for m in loading_markets])}"
@@ -191,6 +201,7 @@ class StatusCommand:
                 )
             return False
 
+        # 有connectors断开了连接
         elif not all([market.network_status is NetworkStatus.CONNECTED for market in self.markets.values()]):
             offline_markets: List[str] = [
                 market_name

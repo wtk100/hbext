@@ -22,6 +22,7 @@ with open(realpath(join(dirname(__file__), '../../VERSION'))) as version_file:
 def login_prompt(secrets_manager_cls: Type[BaseSecretsManager], style: Style):
     err_msg = None
     secrets_manager = None
+    # 如果conf目录没有.password_verification文件则要求新建password并保存至.password_verification文件
     if Security.new_password_required():
         if legacy_confs_exist():
             secrets_manager = migrate_configs_prompt(secrets_manager_cls, style)
@@ -53,6 +54,7 @@ def login_prompt(secrets_manager_cls: Type[BaseSecretsManager], style: Style):
                 else:
                     secrets_manager = secrets_manager_cls(password)
                     store_password_verification(secrets_manager)
+    # 如果conf目录有.password_verification文件则验证输入的password
     else:
         password = input_dialog(
             title="Welcome back to Hummingbot",

@@ -47,11 +47,13 @@ class ETHKeyFileSecretManger(BaseSecretsManager):
             raise ValueError(f"Could not encrypt secret attribute {attr} because no password was provided.")
         password_bytes = self._password.encode()
         value_bytes = value.encode()
+        # 将value用_password加密，得到加密后文本和加密参数
         keyfile_json = _create_v3_keyfile_json(value_bytes, password_bytes)
         json_str = json.dumps(keyfile_json)
         encrypted_value = binascii.hexlify(json_str.encode()).decode()
         return encrypted_value
 
+    # 将value用_password加密，得到解密后文本
     def decrypt_secret_value(self, attr: str, value: str) -> str:
         if self._password is None:
             raise ValueError(f"Could not decrypt secret attribute {attr} because no password was provided.")
@@ -60,12 +62,15 @@ class ETHKeyFileSecretManger(BaseSecretsManager):
         return decrypted_value
 
 
+# 保存密码，利用密码加密PASSWORD_VERIFICATION_WORD并存文件的方式来保存，
+# 验证密码时将用输入的密码解密保存的PASSWORD_VERIFICATION_WORD文件并与PASSWORD_VERIFICATION_WORD明文对比是否match
 def store_password_verification(secrets_manager: BaseSecretsManager):
     encrypted_word = secrets_manager.encrypt_secret_value(PASSWORD_VERIFICATION_WORD, PASSWORD_VERIFICATION_WORD)
     with open(PASSWORD_VERIFICATION_PATH, "w") as f:
         f.write(encrypted_word)
 
 
+# 用输入的密码解密保存的PASSWORD_VERIFICATION_WORD文件并与PASSWORD_VERIFICATION_WORD明文对比是否match
 def validate_password(secrets_manager: BaseSecretsManager) -> bool:
     valid = False
     with open(PASSWORD_VERIFICATION_PATH, "r") as f:
@@ -79,6 +84,7 @@ def validate_password(secrets_manager: BaseSecretsManager) -> bool:
     return valid
 
 
+# 将任意message文本用password加密，返回加密后文本及加密参数
 def _create_v3_keyfile_json(message_to_encrypt, password, kdf="pbkdf2", work_factor=None):
     """
     Encrypt message by a given password.

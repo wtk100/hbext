@@ -76,6 +76,7 @@ class HummingbotApplication(*commands):
             load_ssl_config_map_from_file()
         )
         # This is to start fetching trading pairs for auto-complete
+        # 类方法初始化共享实例，后续此方法就可直接取出共享实例
         TradingPairFetcher.get_instance(self.client_config_map)
         self.ev_loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
         self.markets: Dict[str, ExchangeBase] = {}
@@ -94,10 +95,13 @@ class HummingbotApplication(*commands):
         self.init_time: float = time.time()
         self.start_time: Optional[int] = None
         self.placeholder_mode = False
+        # 来自logging库
         self.log_queue_listener: Optional[logging.handlers.QueueListener] = None
         self.data_feed: Optional[DataFeedBase] = None
         self.notifiers: List[NotifierBase] = []
+        # 止盈止损对象
         self.kill_switch: Optional[KillSwitch] = None
+        # 双端队列
         self._app_warnings: Deque[ApplicationWarning] = deque()
         self._trading_required: bool = True
         self._last_started_strategy_file: Optional[str] = None
@@ -113,6 +117,7 @@ class HummingbotApplication(*commands):
         self._gateway_monitor = GatewayStatusMonitor(self)
 
         command_tabs = self.init_command_tabs()
+        # 将命令与响应函数关联，包括CommandTab的相关命令
         self.parser: ThrowingArgumentParser = load_parser(self, command_tabs)
         self.app = HummingbotCLI(
             self.client_config_map,
@@ -301,12 +306,14 @@ class HummingbotApplication(*commands):
         for connector_name, trading_pairs in self.market_trading_pairs_map.items():
             conn_setting = AllConnectorSettings.get_connector_settings()[connector_name]
 
+            # 创建paper trade connectors并设置余额
             if connector_name.endswith("paper_trade") and conn_setting.type == ConnectorType.Exchange:
                 connector = create_paper_trade_market(conn_setting.parent_name, self.client_config_map, trading_pairs)
                 paper_trade_account_balance = self.client_config_map.paper_trade.paper_trade_account_balance
                 if paper_trade_account_balance is not None:
                     for asset, balance in paper_trade_account_balance.items():
                         connector.set_balance(asset, balance)
+            # 创建connectors对象
             else:
                 keys = Security.api_keys(connector_name)
                 read_only_config = ReadOnlyClientConfigAdapter.lock_config(self.client_config_map)
@@ -347,4 +354,5 @@ class HummingbotApplication(*commands):
         return command_tabs
 
     def save_client_config(self):
+        # /conf/conf_client.yml
         save_to_yml(CLIENT_CONFIG_PATH, self.client_config_map)

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 import pandas as pd
 import yaml
 
+# /hummingbot/client/settings.py
 import hummingbot.client.settings as settings
 from hummingbot import init_logging
 from hummingbot.client.command.gateway_api_manager import GatewayChainApiManager
@@ -74,6 +75,7 @@ class StartCommand(GatewayChainApiManager):
                           conf: Optional[str] = None,
                           is_quickstart: Optional[bool] = False):
 
+        # strategy_task来自HummingbotApplication
         if self._in_start_check or (self.strategy_task is not None and not self.strategy_task.done()):
             self.notify('The bot is already running - please run "stop" first')
             return
@@ -83,11 +85,13 @@ class StartCommand(GatewayChainApiManager):
         if settings.required_rate_oracle:
             # If the strategy to run requires using the rate oracle to find FX rates, validate there is a rate for
             # each configured token pair
+            # 让用户确认汇率数据的源和值是否ok
             if not (await self.confirm_oracle_conversion_rate()):
                 self.notify("The strategy failed to start.")
                 self._in_start_check = False
                 return
 
+        # 如果要用gateway connector，确认其是否ready
         if self.strategy_file_name and self.strategy_name and is_quickstart:
             if self._strategy_uses_gateway_connector(settings.required_exchanges):
                 try:
@@ -100,14 +104,17 @@ class StartCommand(GatewayChainApiManager):
                     self.strategy_file_name = None
                     raise
 
+        # 获取strategy_name，strategy_file_name
         if script:
             file_name = script.split(".")[0]
             self.strategy_name = file_name
             self.strategy_file_name = conf if conf else file_name
+            # 方法来自StatusCommand
         elif not await self.status_check_all(notify_success=False):
             self.notify("Status checks failed. Start aborted.")
             self._in_start_check = False
             return
+        # 执行新策略的话，初始化新策略的logging配置
         if self._last_started_strategy_file != self.strategy_file_name:
             init_logging("hummingbot_logs.yml",
                          self.client_config_map,
@@ -239,6 +246,7 @@ class StartCommand(GatewayChainApiManager):
         script_file_name = settings.SCRIPT_STRATEGIES_PATH / f"{self.strategy_name}.py"
         return script_file_name.exists()
 
+    # 启动时钟，并挂钩connector和strategy以驱动其定时任务
     async def start_market_making(self,  # type: HummingbotApplication
                                   ):
         try:
@@ -283,7 +291,9 @@ class StartCommand(GatewayChainApiManager):
             self.app.clear_input()
             self.placeholder_mode = True
             self.app.hide_input = True
+            # /hummingbot/client/settings.py
             for pair in settings.rate_oracle_pairs:
+                # 方法来自RateCommand，输出汇率的文本描述
                 msg = await self.oracle_rate_msg(pair)
                 self.notify("\nRate Oracle:\n" + msg)
             config = ConfigVar(key="confirm_oracle_use",
@@ -292,7 +302,9 @@ class StartCommand(GatewayChainApiManager):
                                       "this strategy (Yes/No)  >>> ",
                                required_if=lambda: True,
                                validator=lambda v: validate_bool(v))
+            # 方法来自CreateCommand，弹出对话框要求用户输入
             await self.prompt_a_config_legacy(config)
+            # 用户输入Yes
             if config.value:
                 result = True
         except OracleRateUnavailable:

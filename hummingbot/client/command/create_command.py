@@ -295,6 +295,7 @@ class CreateCommand:
         if not self.app.to_stop_config and isinstance(new_config_value, ClientConfigAdapter):
             await self.prompt_for_model_config(new_config_value)
 
+    # 弹出对话框要求用户输入一个配置项的内容
     async def prompt_a_config_legacy(
         self,  # type: HummingbotApplication
         config: ConfigVar,

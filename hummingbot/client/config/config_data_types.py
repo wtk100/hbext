@@ -14,6 +14,7 @@ class ClientConfigEnum(Enum):
         return self.value
 
 
+# 统一规定Config对象的字段的额外数据
 @dataclass()
 class ClientFieldData:
     prompt: Optional[Callable[['BaseClientModel'], str]] = None
@@ -23,6 +24,13 @@ class ClientFieldData:
     is_updatable: bool = False
 
 
+# 多个Config对象的基类，子类包括：
+# ClientConfigMap, MQTTBridgeConfigMap, MarketDataCollectionConfigMap, ColorConfigMap, PaperTradeConfigMap, KillSwitchMode, DBMode, 
+# GatewayConfigMap, GlobalTokenConfigMap, CommandsTimeoutConfigMap, AnonymizedMetricsMode, RateSourceModeBase, BaseConnectorConfigMap, 
+# SSLConfigMap, BaseStrategyConfigMap, InjectiveFeeCalculatorMode, InjectiveNetworkMode, InjectiveAccountMode, InfiniteModel, 
+# FromDateToDateModel, DailyBetweenTimesModel, SingleOrderLevelModel, MultiOrderLevelModel, TrackHangingOrdersModel, IgnoreHangingOrdersModel, 
+# ConversionRateModel, OrderRefreshMode, EmptyMarketConfigMap, MarketConfigMap, StrategyV2ConfigBase, ControllerConfigBase, SimplePMMConfig, 
+# VWAPConfig, SimpleXEMMConfig
 class BaseClientModel(BaseModel):
     model_config = ConfigDict(validate_assignment=True, title=None, extra="forbid", json_encoders={
         datetime: lambda dt: dt.strftime("%Y-%m-%d %H:%M:%S"),
@@ -70,6 +78,7 @@ class BaseClientModel(BaseModel):
             return False
 
 
+# ConnectorConfigMap基类，只有connector名称，其他key等字段由子类添加
 class BaseConnectorConfigMap(BaseClientModel):
     connector: str = Field(
         default=...,

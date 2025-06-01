@@ -43,28 +43,36 @@ class ConfigValidationError(Exception):
     pass
 
 
+# 遍历config item时返回的每个item
 @dataclass()
 class ConfigTraversalItem:
+    # 嵌套层级，从0开始
     depth: int
+    # 配置路径，以'.'分隔
     config_path: str
     attr: str
     value: Any
     printable_value: str
     client_field_data: Optional[ClientFieldData]
+    # FieldInfo来自pydantic
     field_info: FieldInfo
+    # Type来自typing
     type_: Type
 
 
+# 用于操作以BaseClientModel为基类的对象，包括getter/setter/str/eq/validate/traverse等操作
 class ClientConfigAdapter:
     def __init__(self, hb_config: BaseClientModel):
         self._hb_config = hb_config
 
+    # 从config对象取出config item，如果item是嵌套的config对象则返回adapter
     def __getattr__(self, item):
         value = getattr(self._hb_config, item)
         if isinstance(value, BaseClientModel):
             value = ClientConfigAdapter(value)
         return value
 
+    # 设置config对象的config item，包括设置config对象
     def __setattr__(self, key, value):
         if key == "_hb_config":
             super().__setattr__(key, value)
@@ -98,15 +106,19 @@ class ClientConfigAdapter:
     def keys(self) -> Generator[str, None, None]:
         return self._hb_config.model_fields.keys()
 
+    # 获取config对象所有item的config path
     def config_paths(self) -> Generator[str, None, None]:
         return (traversal_item.config_path for traversal_item in self.traverse())
 
+    # 遍历config item
     def traverse(self, secure: bool = True) -> Generator[ConfigTraversalItem, None, None]:
         """The intended use for this function is to simplify config map traversals in the client code.
 
+        Param secure: 对SecretStr字段, True获取加密的config item值, False获取解密的config item值
         If the field is missing, its value will be set to `None` and its printable value will be set to
         'MISSING_AND_REQUIRED'.
         """
+        # config item的层级从0开始
         depth = 0
         for attr, field_info in self._hb_config.model_fields.items():
             type_ = field_info.annotation
@@ -118,8 +130,10 @@ class ClientConfigAdapter:
                 value = None
                 printable_value = "&cMISSING_AND_REQUIRED"
                 client_field_data = self.get_client_data(attr)
+            # 释放当前的第0层config item                
             yield ConfigTraversalItem(
                 depth=depth,
+                # 第0层config item的path就是名称
                 config_path=attr,
                 attr=attr,
                 value=value,
@@ -128,9 +142,12 @@ class ClientConfigAdapter:
                 field_info=field_info,
                 type_=type_,
             )
+            # 如果当前的config item的value是个adapter即嵌套config对象，则递归traverse读取其item，更新item层级和path后释放
             if isinstance(value, ClientConfigAdapter):
                 for traversal_item in value.traverse():
+                    # 层级+1
                     traversal_item.depth += 1
+                    # path构造，含所有层级，以'.'分隔
                     config_path = f"{attr}.{traversal_item.config_path}"
                     traversal_item.config_path = config_path
                     yield traversal_item
@@ -148,6 +165,7 @@ class ClientConfigAdapter:
                 prompt = prompt_fn
         return prompt
 
+    # 属性是否是secret字段如API Key
     def is_secure(self, attr_name: str) -> bool:
         client_data = self.get_client_data(attr_name)
         secure = client_data is not None and client_data.is_secure
@@ -189,12 +207,17 @@ class ClientConfigAdapter:
     def get_type(self, attr_name: str) -> Type:
         return self._hb_config.model_fields[attr_name].annotation
 
+    # 为config对象内容生成yaml
     def generate_yml_output_str_with_comments(self) -> str:
+        # 此时为1个str元素的list
         fragments_with_comments = [self._generate_title()]
+        # 此时为加上所有config item内容的list
         self._add_model_fragments(fragments_with_comments)
+        # 合并成一个长文本
         yml_str = "".join(fragments_with_comments)
         return yml_str
 
+    # 用于验证过程中
     def setattr_no_validation(self, attr: str, value: Any):
         with self._disable_validation():
             setattr(self, attr, value)
@@ -205,6 +228,7 @@ class ClientConfigAdapter:
     def decrypt_all_secure_data(self):
         from hummingbot.client.config.security import Security  # avoids circular import
 
+        # 嵌套的items也会被取出，先用item的client_field_data.is_secure过滤出敏感字段
         secure_config_items = (
             traversal_item
             for traversal_item in self.traverse()
@@ -218,8 +242,10 @@ class ClientConfigAdapter:
                 decrypted_value = value
             else:
                 decrypted_value = Security.secrets_manager.decrypt_secret_value(attr=traversal_item.attr, value=value)
+            # 从config path判断是否为嵌套item, intermediate_items为path上所有父级的item名称，final_config_element为当前item名称
             *intermediate_items, final_config_element = traversal_item.config_path.split(".")
             config_model = self
+            # 为了调用config对象的setattr更新解密后的值，如果当前item有父级item，则一路从当前config对象找到最后一层config对象
             if len(intermediate_items) > 0:
                 for attr in intermediate_items:
                     config_model = config_model.__getattr__(attr)
@@ -248,16 +274,19 @@ class ClientConfigAdapter:
         is_union = hasattr(t, "__origin__") and t.__origin__ == Union
         return is_union
 
+    # 将config对象转换成含嵌套关系、加密后的dict
     def _dict_in_conf_order(self) -> Dict[str, Any]:
         conf_dict = {}
         for attr in self._hb_config.model_fields.keys():
             value = getattr(self, attr)
+            # 递归处理嵌套config对象
             if isinstance(value, ClientConfigAdapter):
                 value = value._dict_in_conf_order()
             conf_dict[attr] = value
         self._encrypt_secrets(conf_dict)
         return conf_dict
 
+    # 加密dict形式的config item value中的SecretStr字段值
     def _encrypt_secrets(self, conf_dict: Dict[str, Any]):
         from hummingbot.client.config.security import Security  # avoids circular import
         for attr, value in conf_dict.items():
@@ -265,6 +294,7 @@ class ClientConfigAdapter:
                 clear_text_value = value.get_secret_value() if isinstance(value, SecretStr) else value
                 conf_dict[attr] = Security.secrets_manager.encrypt_secret_value(attr, clear_text_value)
 
+    # 解密SecretStr字段值
     def _decrypt_secrets(self, conf_dict: Dict[str, Any]):
         from hummingbot.client.config.security import Security  # avoids circular import
         for attr, value in conf_dict.items():
@@ -273,21 +303,25 @@ class ClientConfigAdapter:
                 decrypted_value = Security.secrets_manager.decrypt_secret_value(attr, value.get_secret_value())
                 conf_dict[attr] = SecretStr(decrypted_value)
 
+    # 仅测试用
     def _decrypt_all_internal_secrets(self):
         from hummingbot.client.config.security import Security  # avoids circular import
 
+        # 直接用item的type_==SecretStr判断敏感字段，而decrypt_all_secure_data(self)是先用is_secure来判断再用SecretStr判断
         for traversal_item in self.traverse():
             if traversal_item.type_ == SecretStr:
                 encrypted_value = traversal_item.value
                 if isinstance(encrypted_value, SecretStr):
                     encrypted_value = encrypted_value.get_secret_value()
                 decrypted_value = Security.secrets_manager.decrypt_secret_value(traversal_item.attr, encrypted_value)
+                # 处理嵌套，与decrypt_all_secure_data(self)一样
                 parent_attributes = traversal_item.config_path.split(".")[:-1]
                 config = self
                 for parent_attribute in parent_attributes:
                     config = getattr(config, parent_attribute)
                 setattr(config, traversal_item.attr, decrypted_value)
 
+    # 返回格式化后的config对象的title(上下一行#，共3行)
     def _generate_title(self) -> str:
         title = f"{self._hb_config.model_config['title']}"
         title = self._adorn_title(title)
@@ -301,6 +335,7 @@ class ClientConfigAdapter:
             title = f"{'#' * title_len}\n{title}\n{'#' * title_len}"
         return title
 
+    # 为fragments_with_comments加上config对象所有item内容，初始只有title(3行)
     def _add_model_fragments(
         self,
         fragments_with_comments: List[str],
@@ -312,21 +347,27 @@ class ClientConfigAdapter:
         for traversal_item in first_level_conf_items_generator:
             fragments_with_comments.append("\n")
 
+            # 拿到item的description作comment
             attr_comment = traversal_item.field_info.description
             if attr_comment is not None:
+                # 在comment中用indent表示层级
                 comment_prefix = f"{' ' * 2 * traversal_item.depth}# "
+                # 确保每行comment加上indent
                 attr_comment = "\n".join(f"{comment_prefix}{c}" for c in attr_comment.split("\n"))
                 fragments_with_comments.append(attr_comment)
                 fragments_with_comments.append("\n")
 
             attribute = traversal_item.attr
             value = getattr(self, attribute)
+            # 如果item值为adapter即嵌套config对象，value替换为其含嵌套关系、加密后的dict形式
             if isinstance(value, ClientConfigAdapter):
                 value = value._dict_in_conf_order()
+            # conf_as_dictionary是只有一个元素的dict
             if isinstance(traversal_item.value, PureWindowsPath):
                 conf_as_dictionary = {attribute: traversal_item.printable_value}
             else:
                 conf_as_dictionary = {attribute: value}
+            # 确保第一层被加密
             self._encrypt_secrets(conf_as_dictionary)
 
             yaml_config = yaml.safe_dump(conf_as_dictionary, sort_keys=False)
@@ -650,6 +691,7 @@ def load_connector_config_map_from_file(yml_path: Path) -> ClientConfigAdapter:
     return config_map
 
 
+# 从yaml文件把ClientConfigMap数据读进config对象，验证并修正，保存文件，再返回
 def load_client_config_map_from_file() -> ClientConfigAdapter:
     yml_path = CLIENT_CONFIG_PATH
     if yml_path.exists():
@@ -662,6 +704,7 @@ def load_client_config_map_from_file() -> ClientConfigAdapter:
     return config_map
 
 
+# 从yaml文件把SSLConfigMap数据读进config对象，验证并修正，保存文件，再返回
 def load_ssl_config_map_from_file() -> ClientConfigAdapter:
     yml_path = GATEWAY_SSL_CONF_FILE
     if yml_path.exists():
@@ -704,6 +747,7 @@ def get_connector_config_yml_path(connector_name: str) -> Path:
     return connector_path
 
 
+# 列出/conf/connectors目录下所有配置文件
 def list_connector_configs() -> List[Path]:
     connector_configs = [
         Path(f.path) for f in scandir(str(CONNECTORS_CONF_DIR_PATH))
@@ -853,6 +897,9 @@ def write_config_to_yml(
     save_to_yml(CLIENT_CONFIG_PATH, client_config_map)
 
 
+# 程序启动时用/templates下的文件初始化或覆盖/conf下的配置文件
+# /templates下文件名带"_TEMPLATE"和不带"strategy"的文件，在/conf下没有就copy过去
+# 对于hummingbot_logs.yml，如果/conf下的版本号更低则用/templates下的文件覆盖
 async def create_yml_files_legacy():
     """
     Copy `hummingbot_logs.yml` and `conf_global.yml` templates to the `conf` directory on start up

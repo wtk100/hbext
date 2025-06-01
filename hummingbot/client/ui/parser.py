@@ -42,6 +42,7 @@ def load_parser(hummingbot: "HummingbotApplication", command_tabs) -> [ThrowingA
     subparsers = parser.add_subparsers()
 
     connect_parser = subparsers.add_parser("connect", help="List available exchanges and add API keys to them")
+    # CONNECT_OPTIONS取自ConnectorSetting对象集合的name
     connect_parser.add_argument("option", nargs="?", choices=CONNECT_OPTIONS, help="Name of the exchange that you want to connect")
     connect_parser.set_defaults(func=hummingbot.connect)
 

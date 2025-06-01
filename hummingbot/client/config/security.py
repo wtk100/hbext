@@ -62,6 +62,7 @@ class Security:
     def decrypt_all(cls):
         cls._secure_configs.clear()
         cls._decryption_done.clear()
+        # 列出/conf/connectors目录下所有配置文件
         encrypted_files = list_connector_configs()
         for file in encrypted_files:
             cls.decrypt_connector_config(file)

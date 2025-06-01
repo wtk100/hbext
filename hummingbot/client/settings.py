@@ -61,18 +61,23 @@ class ConnectorType(Enum):
     """
 
     GATEWAY_DEX = "GATEWAY_DEX"
+    # CLOB通常指Central Limit Order Book，这是一种在加密货币交易所中广泛使用的交易协议
     CLOB_SPOT = "CLOB_SPOT"
     CLOB_PERP = "CLOB_PERP"
+    # 以下为non gateway connector type
     Connector = "connector"
     Exchange = "exchange"
     Derivative = "derivative"
 
 
+# DEX连接配置文件相关操作
 class GatewayConnectionSetting:
+    # 获取gateway_connections.json文件路径
     @staticmethod
     def conf_path() -> str:
         return realpath(join(CONF_DIR_PATH, "gateway_connections.json"))
 
+    # 将gateway_connections.json加载到Json
     @staticmethod
     def load() -> List[Dict[str, str]]:
         connections_conf_path: str = GatewayConnectionSetting.conf_path()
@@ -81,16 +86,19 @@ class GatewayConnectionSetting:
                 return json.load(fd)
         return []
 
+    # 将配置内容保存到gateway_connections.json
     @staticmethod
     def save(settings: List[Dict[str, str]]):
         connections_conf_path: str = GatewayConnectionSetting.conf_path()
         with open(connections_conf_path, "w") as fd:
             json.dump(settings, fd)
 
+    # 从连接配置中获取市场名称：由connector、chain、network的组合表示
     @staticmethod
     def get_market_name_from_connector_spec(connector_spec: Dict[str, str]) -> str:
         return f"{connector_spec['connector']}_{connector_spec['chain']}_{connector_spec['network']}"
 
+    # 从连接配置中获取某市场connector_chain_network的配置内容
     @staticmethod
     def get_connector_spec(connector_name: str, chain: str, network: str) -> Optional[Dict[str, str]]:
         connector: Optional[Dict[str, str]] = None
@@ -103,6 +111,7 @@ class GatewayConnectionSetting:
 
         return connector
 
+    # 从连接配置中获取某市场connector_chain_network的配置内容
     @staticmethod
     def get_connector_spec_from_market_name(market_name: str) -> Optional[Dict[str, str]]:
         for chain in ["ethereum", "solana"]:
@@ -138,6 +147,7 @@ class GatewayConnectionSetting:
             connectors_conf.append(new_connector_spec)
         GatewayConnectionSetting.save(connectors_conf)
 
+    # 更新connector、chain、network对应配置信息中的tokens字段
     @staticmethod
     def upsert_connector_spec_tokens(connector_chain_network: str, tokens: List[str]):
         updated_connector: Optional[Dict[str, Any]] = GatewayConnectionSetting.get_connector_spec_from_market_name(connector_chain_network)
@@ -154,6 +164,7 @@ class GatewayConnectionSetting:
         GatewayConnectionSetting.save(connectors_conf)
 
 
+# 交易所连接配置内容
 class ConnectorSetting(NamedTuple):
     name: str
     type: ConnectorType
@@ -161,6 +172,7 @@ class ConnectorSetting(NamedTuple):
     centralised: bool
     use_ethereum_wallet: bool
     trade_fee_schema: TradeFeeSchema
+    # key & secret等
     config_keys: Optional["BaseConnectorConfigMap"]
     is_sub_domain: bool
     parent_name: Optional[str]
@@ -177,6 +189,7 @@ class ConnectorSetting(NamedTuple):
 
     def connector_connected(self) -> str:
         from hummingbot.client.config.security import Security
+        # 检查/conf/connectors/下xxxxxx.yml(biannace_perpetual.yml)文件是否存在
         return True if Security.connector_config_file_exists(self.name) else False
 
     def uses_clob_connector(self) -> bool:
@@ -213,6 +226,7 @@ class ConnectorSetting(NamedTuple):
             return "".join(splited_name)
         return "".join([o.capitalize() for o in self.module_name().split("_")])
 
+    # 获取交易所对应api data source模块名称
     def get_api_data_source_module_name(self) -> str:
         module_name = ""
         if self.uses_clob_connector():
@@ -222,6 +236,7 @@ class ConnectorSetting(NamedTuple):
                 module_name = f"{self.name.split('_')[0]}_api_data_source"
         return module_name
 
+    # 获取交易所对应api data source类名称
     def get_api_data_source_class_name(self) -> str:
         class_name = ""
         if self.uses_clob_connector():
@@ -231,10 +246,12 @@ class ConnectorSetting(NamedTuple):
                 class_name = f"{self.name.split('_')[0].capitalize()}APIDataSource"
         return class_name
 
+    # 初始化并返回连接参数
     def conn_init_parameters(
         self,
         trading_pairs: Optional[List[str]] = None,
         trading_required: bool = False,
+        # api key & secret
         api_keys: Optional[Dict[str, Any]] = None,
         client_config_map: Optional["ClientConfigAdapter"] = None,
     ) -> Dict[str, Any]:
@@ -258,8 +275,10 @@ class ConnectorSetting(NamedTuple):
                     client_config_map=client_config_map,
                     connector_spec=connector_spec,
                 )
+        # init parameters for non gateway non sub domain connectors        
         elif not self.is_sub_domain:
             params = api_keys
+        # init parameters for non gateway sub domain connectors
         else:
             params: Dict[str, Any] = {k.replace(self.name, self.parent_name): v for k, v in api_keys.items()}
             params["domain"] = self.domain_parameter
@@ -295,6 +314,8 @@ class ConnectorSetting(NamedTuple):
         from hummingbot.client.hummingbot_application import HummingbotApplication
 
         trading_pairs = trading_pairs or []
+        # self.module_path() return connector full path name, e.g. hummingbot.connector.exchange.binance.binance_exchange
+        # return connector class name, e.g. BinanceExchange
         connector_class = getattr(importlib.import_module(self.module_path()), self.class_name())
         kwargs = {}
         if isinstance(self.config_keys, Dict):
@@ -333,16 +354,21 @@ class AllConnectorSettings:
         Iterate over files in specific Python directories to create a dictionary of exchange names to ConnectorSetting.
         """
         cls.all_connector_settings = {}  # reset
+        # 用于排除/hummingbot/connector下的非connector定义目录
         connector_exceptions = ["mock_paper_exchange", "mock_pure_python_paper_exchange", "paper_trade"]
         # connector_exceptions = ["mock_paper_exchange", "mock_pure_python_paper_exchange", "paper_trade", "injective_v2", "injective_v2_perpetual"]
 
+        # 找出/hummingbot/connector下的connector类型目录
         type_dirs: List[DirEntry] = [
             cast(DirEntry, f) for f in scandir(f"{root_path() / 'hummingbot' / 'connector'}")
+            # ["test_support", "utilities", "gateway"]
             if f.is_dir() and f.name not in CONNECTOR_SUBMODULES_THAT_ARE_NOT_CEX_TYPES
         ]
+        # 添加CEX/Non Gateway Connectors
         for type_dir in type_dirs:
             if type_dir.name == 'gateway':
                 continue
+            # 从connector类型目录下再找目录，如derivative/下的一系列交易所
             connector_dirs: List[DirEntry] = [
                 cast(DirEntry, f) for f in scandir(type_dir.path)
                 if f.is_dir() and exists(join(f.path, "__init__.py"))
@@ -353,44 +379,64 @@ class AllConnectorSettings:
                 if connector_dir.name in cls.all_connector_settings:
                     raise Exception(f"Multiple connectors with the same {connector_dir.name} name.")
                 try:
+                    # 构造connector utils文件路径，如hummingbot.connector.derivative.binance_perpetual.binance_perpetual_utils
                     util_module_path: str = f"hummingbot.connector.{type_dir.name}." \
                                             f"{connector_dir.name}.{connector_dir.name}_utils"
                     util_module = importlib.import_module(util_module_path)
                 except ModuleNotFoundError:
                     continue
+                # utils module如binance_perpetual_utils的DEFAULT_FEES就是TradeFeeSchema，大多数都是taker和maker费率
                 trade_fee_settings: List[float] = getattr(util_module, "DEFAULT_FEES", None)
+                # 确保trade_fee_settings从List转为TradeFeeSchema
                 trade_fee_schema: TradeFeeSchema = cls._validate_trade_fee_schema(
                     connector_dir.name, trade_fee_settings
                 )
+                # 添加当前connector的ConnectorSetting对象
                 cls.all_connector_settings[connector_dir.name] = ConnectorSetting(
+                    # e.g.: binance_perpetual
                     name=connector_dir.name,
+                    # e.g.: derivative
                     type=ConnectorType[type_dir.name.capitalize()],
                     centralised=getattr(util_module, "CENTRALIZED", True),
+                    # e.g.: BTC-USDT
                     example_pair=getattr(util_module, "EXAMPLE_PAIR", ""),
+                    # 多数交易所utils没有定义
                     use_ethereum_wallet=getattr(util_module, "USE_ETHEREUM_WALLET", False),
                     trade_fee_schema=trade_fee_schema,
+                    # e.g.: BinancePerpetualConfigMap对象
                     config_keys=getattr(util_module, "KEYS", None),
                     is_sub_domain=False,
                     parent_name=None,
                     domain_parameter=None,
+                    # 多数交易所utils没有定义
                     use_eth_gas_lookup=getattr(util_module, "USE_ETH_GAS_LOOKUP", False),
                 )
                 # Adds other domains of connector
+                # 添加当前connector附带的ConnectorSetting对象，如binance_perpetual的binance_perpetual_testnet
                 other_domains = getattr(util_module, "OTHER_DOMAINS", [])
                 for domain in other_domains:
                     trade_fee_settings = getattr(util_module, "OTHER_DOMAINS_DEFAULT_FEES")[domain]
+                    # 确保trade_fee_settings从List转为TradeFeeSchema
                     trade_fee_schema = cls._validate_trade_fee_schema(domain, trade_fee_settings)
+                    # e.g.: binance_perpetual的ConnectorSetting对象
                     parent = cls.all_connector_settings[connector_dir.name]
                     cls.all_connector_settings[domain] = ConnectorSetting(
+                        # e.g.: binance_perpetual_testnet
                         name=domain,
+                        # e.g.: derivative
                         type=parent.type,
                         centralised=parent.centralised,
+                        # e.g.: BTC-USDT
                         example_pair=getattr(util_module, "OTHER_DOMAINS_EXAMPLE_PAIR")[domain],
                         use_ethereum_wallet=parent.use_ethereum_wallet,
                         trade_fee_schema=trade_fee_schema,
+                        # e.g.: BinancePerpetualTestnetConfigMap对象
                         config_keys=getattr(util_module, "OTHER_DOMAINS_KEYS")[domain],
+                        # e.g.: binance_perpetual_testnet以binance_perpetual为parent
                         is_sub_domain=True,
+                        # e.g.: binance_perpetual
                         parent_name=parent.name,
+                        # e.g.: binance_perpetual_testnet
                         domain_parameter=getattr(util_module, "OTHER_DOMAINS_PARAMETER")[domain],
                         use_eth_gas_lookup=parent.use_eth_gas_lookup,
                     )
@@ -418,6 +464,7 @@ class AllConnectorSettings:
 
         return cls.all_connector_settings
 
+    # 往cls.all_connector_settings添加支持paper trade的connector的ConnectorSetting对象
     @classmethod
     def initialize_paper_trade_settings(cls, paper_trade_exchanges: List[str]):
         cls.paper_trade_connectors_names = paper_trade_exchanges
@@ -454,6 +501,7 @@ class AllConnectorSettings:
         current_settings = cls.get_connector_settings()[connector]
         current_keys = current_settings.config_keys
         new_keys = (
+            # 置空
             current_keys if current_keys is None else current_keys.__class__.model_construct()
         )
         cls.update_connector_config_keys(new_keys)
@@ -508,6 +556,7 @@ class AllConnectorSettings:
     def get_example_assets(cls) -> Dict[str, str]:
         return {name: cs.example_pair.split("-")[0] for name, cs in cls.get_connector_settings().items()}
 
+    # 参数trade_fee_schema如果是List类型，则转为TradeFeeSchema
     @staticmethod
     def _validate_trade_fee_schema(
         exchange_name: str, trade_fee_schema: Optional[Union[TradeFeeSchema, List[float]]]
