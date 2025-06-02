@@ -20,12 +20,16 @@ class TWAPExecutorConfig(ExecutorConfigBase):
     side: TradeType
     leverage: int = 1
     total_amount_quote: Decimal
+    # 下单期间总时长
     total_duration: int
+    # 下单间隔时间
     order_interval: int
     mode: TWAPMode = TWAPMode.TAKER
 
     # MAKER mode specific parameters
+    # 下限价单的价格buffer，即要多少价格优势
     limit_order_buffer: Optional[Decimal] = None
+    # 下限价单的订单刷新时间，即过多久就重下限价单
     order_resubmission_time: Optional[int] = None
 
     @field_validator('limit_order_buffer', mode="before")

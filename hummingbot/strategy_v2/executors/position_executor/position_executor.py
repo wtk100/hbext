@@ -1,3 +1,6 @@
+########################################################################################################################
+### 单个仓位的Executor: 跟踪管理一个仓位的整个生命周期，包括跟踪订单执行情况、按配置止盈止损，包括动态止盈
+########################################################################################################################
 import asyncio
 import logging
 from decimal import Decimal
@@ -50,7 +53,7 @@ class PositionExecutor(ExecutorBase):
             raise ValueError(error)
         super().__init__(strategy=strategy, config=config, connectors=[config.connector_name],
                          update_interval=update_interval)
-        # 若未配置开仓价，从市场获取当前价作为开仓价                 
+        # 若未配置开仓价，从市场获取: 若此仓位是要买，则以买一作为开仓价，否则以卖一                 
         if not config.entry_price:
             open_order_price_type = PriceType.BestBid if config.side == TradeType.BUY else PriceType.BestAsk
             config.entry_price = self.get_price(config.connector_name, config.trading_pair,
@@ -59,12 +62,14 @@ class PositionExecutor(ExecutorBase):
         self.trading_rules = self.get_trading_rules(self.config.connector_name, self.config.trading_pair)
 
         # Order tracking
+        # 注：TrackedOrder内的order是InFlightOrder对象，初始化时为空
         self._open_order: Optional[TrackedOrder] = None
         self._close_order: Optional[TrackedOrder] = None
         self._take_profit_limit_order: Optional[TrackedOrder] = None
         self._failed_orders: List[TrackedOrder] = []
         self._trailing_stop_trigger_pct: Optional[Decimal] = None
 
+        # used to track the total amount filled that is updated by the event in case that the InFlightOrder is not available
         self._total_executed_amount_backup: Decimal = Decimal("0")
         self._current_retries = 0
         self._max_retries = max_retries
@@ -82,6 +87,7 @@ class PositionExecutor(ExecutorBase):
     def is_trading(self):
         """
         Check if the position is trading.
+        正在交易判定标准: 状态为RUNNING且开仓清单已有成交
 
         :return: True if the position is trading, False otherwise.
         """
@@ -91,14 +97,17 @@ class PositionExecutor(ExecutorBase):
     def open_filled_amount(self) -> Decimal:
         """
         Get the filled amount of the open order.
+        开仓清单已成交数量, 以Base Asset计
 
         :return: The filled amount of the open order if it exists, otherwise 0.
         """
         if self._open_order:
+            # 如果交易费币种与交易目标币种(Base Asset)相同，交易数量要扣除交易费
             if self._open_order.fee_asset == self.config.trading_pair.split("-")[0]:
                 open_filled_amount = self._open_order.executed_amount_base - self._open_order.cum_fees_base
             else:
                 open_filled_amount = self._open_order.executed_amount_base
+            # 这里为何要quantize已交易数量？                
             return self.connectors[self.config.connector_name].quantize_order_amount(
                 trading_pair=self.config.trading_pair,
                 amount=open_filled_amount)
@@ -109,6 +118,7 @@ class PositionExecutor(ExecutorBase):
     def amount_to_close(self) -> Decimal:
         """
         Get the amount to close the position.
+        待清仓数量: 开仓订单已成交量 - 清仓订单已成交量
 
         :return: The amount to close the position.
         """
@@ -118,6 +128,7 @@ class PositionExecutor(ExecutorBase):
     def open_filled_amount_quote(self) -> Decimal:
         """
         Get the filled amount of the open order in quote currency.
+        开仓清单已成交数量, 以Quote Asset计
 
         :return: The filled amount of the open order in quote currency.
         """
@@ -127,6 +138,7 @@ class PositionExecutor(ExecutorBase):
     def close_filled_amount(self) -> Decimal:
         """
         Get the filled amount of the close order.
+        清仓清单已成交数量, 以Base Asset计
 
         :return: The filled amount of the close order if it exists, otherwise 0.
         """
@@ -136,6 +148,7 @@ class PositionExecutor(ExecutorBase):
     def close_filled_amount_quote(self) -> Decimal:
         """
         Get the filled amount of the close order in quote currency.
+        清仓清单已成交数量, 以Quote Asset计
 
         :return: The filled amount of the close order in quote currency.
         """
@@ -145,6 +158,7 @@ class PositionExecutor(ExecutorBase):
     def filled_amount(self) -> Decimal:
         """
         Get the filled amount of the position.
+        此仓位的总成交量, 以Base Asset计
         """
         return self.open_filled_amount + self.close_filled_amount
 
@@ -152,6 +166,7 @@ class PositionExecutor(ExecutorBase):
     def filled_amount_quote(self) -> Decimal:
         """
         Get the filled amount of the position in quote currency.
+        此仓位的总成交量, 以Quote Asset计
         """
         return self.open_filled_amount_quote + self.close_filled_amount_quote
 
@@ -159,6 +174,7 @@ class PositionExecutor(ExecutorBase):
     def is_expired(self) -> bool:
         """
         Check if the position is expired.
+        此仓位是否超时
 
         :return: True if the position is expired, False otherwise.
         """
@@ -168,6 +184,7 @@ class PositionExecutor(ExecutorBase):
     def current_market_price(self) -> Decimal:
         """
         This method is responsible for getting the current market price to be used as a reference for control barriers.
+        获取用于清仓管理的市场价; 若仓位是买方, 取买一价(将要卖出), 否则取卖一价
 
         :return: The current market price.
         """
@@ -186,12 +203,15 @@ class PositionExecutor(ExecutorBase):
         if self._open_order and self._open_order.is_done:
             return self._open_order.average_executed_price
         elif self.config.triple_barrier_config.open_order_type == OrderType.LIMIT_MAKER:
+            # 订单类型为LIMIT_MAKER，仓位为买方，开仓价取配置开仓价和买一的最小
             if self.config.side == TradeType.BUY:
                 best_bid = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.BestBid)
                 return min(self.config.entry_price, best_bid)
+            # 订单类型为LIMIT_MAKER，仓位为卖方，开仓价取配置开仓价和卖一的最小
             else:
                 best_ask = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.BestAsk)
                 return max(self.config.entry_price, best_ask)
+        # 未成交完，订单类型为MARKET/LIMIT，开仓价取配置开仓价
         else:
             return self.config.entry_price
 
@@ -200,6 +220,7 @@ class PositionExecutor(ExecutorBase):
         """
         This method is responsible for getting the close price. If the close order is done, it returns the average executed price.
         Otherwise, it returns the current market price.
+        清仓价, 未完成清仓的订单以当前市场价为准
 
         :return: The close price.
         """
@@ -216,6 +237,7 @@ class PositionExecutor(ExecutorBase):
     def trade_pnl_pct(self) -> Decimal:
         """
         Calculate the trade pnl (Pure pnl without fees)
+        计算当前交易净收益率(不含交易费用, 单纯以开仓价格和当前价格/清仓价格计算)
 
         :return: The trade pnl percentage.
         """
@@ -231,6 +253,7 @@ class PositionExecutor(ExecutorBase):
     def trade_pnl_quote(self) -> Decimal:
         """
         Calculate the trade pnl in quote asset
+        计算当前交易产生的收益额
 
         :return: The trade pnl in quote asset.
         """
@@ -239,6 +262,7 @@ class PositionExecutor(ExecutorBase):
     def get_net_pnl_quote(self) -> Decimal:
         """
         Calculate the net pnl in quote asset
+        计算当前交易产生的净收益额(除交易费)
 
         :return: The net pnl in quote asset.
         """
@@ -247,6 +271,7 @@ class PositionExecutor(ExecutorBase):
     def get_cum_fees_quote(self) -> Decimal:
         """
         Calculate the cumulative fees in quote asset
+        计算累计交易费, 即开仓订单和清仓订单的累计交易费之和
 
         :return: The cumulative fees in quote asset.
         """
@@ -256,6 +281,7 @@ class PositionExecutor(ExecutorBase):
     def get_net_pnl_pct(self) -> Decimal:
         """
         Calculate the net pnl percentage
+        计算净收益率=净收益额/开仓订单已成交额
 
         :return: The net pnl percentage.
         """
@@ -276,6 +302,7 @@ class PositionExecutor(ExecutorBase):
     def take_profit_price(self):
         """
         This method is responsible for calculating the take profit price to place the take profit limit order.
+        计算止盈价, 配置的止盈订单类型若为MARKET/LIMIT则取配置价, 若为LIMIT_MAKER则买方仓位取配置价与卖一的更高者、卖方仓位取配置价与买一的更低者
 
         :return: The take profit price.
         """
@@ -296,6 +323,7 @@ class PositionExecutor(ExecutorBase):
     async def control_task(self):
         """
         This method is responsible for controlling the task based on the status of the executor.
+        来自基类RunnableBase, 由其start方法调用
 
         :return: None
         """
@@ -309,6 +337,7 @@ class PositionExecutor(ExecutorBase):
     def all_orders_completed(self):
         """
         This method is responsible for checking if the open orders are completed.
+        检查是否所有订单都完成: 包括开仓订单、止盈订单、清仓订单
 
         :return: True if the open orders are completed, False otherwise.
         """
@@ -324,20 +353,30 @@ class PositionExecutor(ExecutorBase):
         :return: None
         """
         self.close_timestamp = self._strategy.current_timestamp
+        # 若所有订单已完成
         if self.all_orders_completed():
+            # 若清仓类型设置成了持仓
             if self.close_type == CloseType.POSITION_HOLD:
+                # 若开仓订单有成交则记录开仓订单信息
                 if self._open_order and self._open_order.is_filled:
                     self._held_position_orders.append(self._open_order.order.to_json())
+                # 若清仓订单有成交则记录清仓订单信息
                 if self._close_order and self._close_order.is_filled:
                     self._held_position_orders.append(self._close_order.order.to_json())
+                # 若订单有成交则把清仓类型改为EARLY_STOP，否则保持POSITION_HOLD
                 if len(self._held_position_orders) == 0:
                     self.close_type = CloseType.EARLY_STOP
+                # 停止control_loop执行control_task循环并调用on_stop、取消事件注册
                 self.stop()
+            # 若清仓订单执行完成则直接停止
             elif self.open_and_close_volume_match():
+                # 停止control_loop执行control_task循环并调用on_stop、取消事件注册
                 self.stop()
+            # 清仓订单未执行完成则确保其执行完成
             else:
                 await self.control_close_order()
                 self._current_retries += 1
+        # 若有订单未完成则取消开仓订单
         else:
             self.cancel_open_orders()
         await self._sleep(5.0)
@@ -354,19 +393,25 @@ class PositionExecutor(ExecutorBase):
         completed, it stops the executor. If the close order is not placed, it places the close order. If the close order
         is not filled, it waits for the close order to be filled and requests the order information to the connector.
         """
+        # 若self._close_order(TrackedOrder对象)已创建
         if self._close_order:
+            # 若self._close_order内的InFlightOrder对象为空则尝试用client_order_id从connector获取
             in_flight_order = self.get_in_flight_order(self.config.connector_name,
                                                        self._close_order.order_id) if not self._close_order.order else self._close_order.order
+            # in_flight_order存在(要么从connector获取到，要么之前已在self._close_order中存在)
             if in_flight_order:
                 self._close_order.order = in_flight_order
                 connector = self.connectors[self.config.connector_name]
+                # connector._update_orders_with_error_handler来自ExchangePyBase，会使connector触发各种订单事件
                 await connector._update_orders_with_error_handler(
                     orders=[in_flight_order],
                     error_handler=connector._handle_update_error_for_lost_order)
                 self.logger().info("Waiting for close order to be filled")
+            # 若self._close_order内的InFlightOrder对象为空且从connector获取失败，则将此self._close_order记录为失败订单再置空
             else:
                 self._failed_orders.append(self._close_order)
                 self._close_order = None
+        # 若self._close_order(TrackedOrder对象)为空，则尝试创建并取消开仓订单
         else:
             self.place_close_order_and_cancel_open_orders(close_type=self.close_type)
 
@@ -400,10 +445,12 @@ class PositionExecutor(ExecutorBase):
 
         :return: None
         """
+        # 若无开仓订单且市价满足开仓条件，则下开仓订单
         if not self._open_order:
             if self._is_within_activation_bounds(self.config.entry_price, self.config.side,
                                                  self.config.triple_barrier_config.open_order_type):
                 self.place_open_order()
+        # 若有开仓订单且未成交且市价不满足开仓条件，则取消开仓订单
         else:
             if self._open_order.order and not self._open_order.is_filled and \
                     not self._is_within_activation_bounds(self.config.entry_price, self.config.side,
@@ -414,19 +461,26 @@ class PositionExecutor(ExecutorBase):
         """
         This method is responsible for checking if the close price is within the activation bounds to place the open
         order. If the activation bounds are not set, it returns True. This makes the executor more capital efficient.
+        注: 开仓、清仓都会用到
 
         :param close_price: The close price to be checked.
         :return: True if the close price is within the activation bounds, False otherwise.
         """
         activation_bounds = self.config.activation_bounds
         mid_price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        # 若配置了激活边界
         if activation_bounds:
+            # 订单为LIMIT/LIMIT_MAKER
             if order_type.is_limit_type():
                 if side == TradeType.BUY:
+                    # 市场中间价往下第一个边界幅度后 <= 订单价 (order_price <= mid_price)
                     return order_price >= mid_price * (1 - activation_bounds[0])
+                    # 市场中间价往上第一个边界幅度后 >= 订单价 (order_price >= mid_price)
                 else:
                     return order_price <= mid_price * (1 + activation_bounds[0])
+            # 订单为MARKET
             else:
+                # 市场中间价在订单价激活边界内
                 if side == TradeType.BUY:
                     min_price_to_buy = order_price * (1 - activation_bounds[0])
                     max_price_to_buy = order_price * (1 + activation_bounds[1])
@@ -475,6 +529,7 @@ class PositionExecutor(ExecutorBase):
         This method is responsible for placing the close order and canceling the open orders. If the difference between
         the open filled amount and the close filled amount is greater than the minimum order size, it places the close
         order. It also cancels the open orders.
+        注: 清仓订单为市价单
 
         :param close_type: The type of the close order.
         :param price: The price to be used in the close order.
@@ -500,6 +555,7 @@ class PositionExecutor(ExecutorBase):
     def cancel_open_orders(self):
         """
         This method is responsible for canceling the open orders.
+        注: 同时cancel止盈订单
 
         :return: None
         """
@@ -529,17 +585,22 @@ class PositionExecutor(ExecutorBase):
         :return: None
         """
         if self.config.triple_barrier_config.take_profit:
+            # 止盈订单配置为LIMIT/LIMIT_MAKER
             if self.config.triple_barrier_config.take_profit_order_type.is_limit_type():
+                # 检查激活边界
                 is_within_activation_bounds = self._is_within_activation_bounds(
                     self.take_profit_price, self.close_order_side,
                     self.config.triple_barrier_config.take_profit_order_type)
+                # 若没有下止盈单且在激活边界中则下单
                 if not self._take_profit_limit_order:
                     if is_within_activation_bounds:
                         self.place_take_profit_limit_order()
+                # 若下了止盈单且不在激活边界中则取消止盈单
                 else:
                     if self._take_profit_limit_order.is_open and not self._take_profit_limit_order.is_filled and \
                             not is_within_activation_bounds:
                         self.cancel_take_profit()
+            # 止盈订单配置为MARKET，直接挂市价单
             elif self.net_pnl_pct >= self.config.triple_barrier_config.take_profit:
                 self.place_close_order_and_cancel_open_orders(close_type=CloseType.TAKE_PROFIT)
 
@@ -551,6 +612,7 @@ class PositionExecutor(ExecutorBase):
         :return: None
         """
         if self.is_expired:
+            # 直接挂市价单
             self.place_close_order_and_cancel_open_orders(close_type=CloseType.TIME_LIMIT)
 
     def place_take_profit_limit_order(self):
@@ -655,6 +717,7 @@ class PositionExecutor(ExecutorBase):
         self._total_executed_amount_backup += event.base_asset_amount
         self.update_tracked_orders_with_order_id(event.order_id)
 
+        # 若完成的订单是止盈单，则关闭Executor
         if self._take_profit_limit_order and self._take_profit_limit_order.order_id == event.order_id:
             self.close_type = CloseType.TAKE_PROFIT
             self._close_order = self._take_profit_limit_order
@@ -696,6 +759,7 @@ class PositionExecutor(ExecutorBase):
 
     def get_custom_info(self) -> Dict:
         return {
+            # level_id没有实际用到
             "level_id": self.config.level_id,
             "current_position_average_price": self.entry_price,
             "side": self.config.side,
@@ -757,16 +821,24 @@ class PositionExecutor(ExecutorBase):
             lines.extend(["-----------------------------------------------------------------------------------------------------------"])
         return lines
 
+    # 控制动态止损
     def control_trailing_stop(self):
         if self.config.triple_barrier_config.trailing_stop:
             net_pnl_pct = self.get_net_pnl_pct()
+            # 若还未初始化动态止损的触发收益率
             if not self._trailing_stop_trigger_pct:
+                # 若当前收益率 > 配置的动态止损激活收益率
                 if net_pnl_pct > self.config.triple_barrier_config.trailing_stop.activation_price:
+                    # 那么动态止损的触发收益率就初始化为：当前收益率 - 配置的动态止损回撤幅度
                     self._trailing_stop_trigger_pct = net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta
+            # 若初始化过动态止损的触发收益率
             else:
+                # 若当前收益率回撤到动态止损的触发收益率以下则清仓
                 if net_pnl_pct < self._trailing_stop_trigger_pct:
                     self.place_close_order_and_cancel_open_orders(close_type=CloseType.TRAILING_STOP)
+                # 若当前收益率 - 配置的动态止损回撤幅度 > 当前动态止损的触发收益率，即收益率继续上涨
                 if net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta > self._trailing_stop_trigger_pct:
+                    # 那么更新动态止损的触发收益率
                     self._trailing_stop_trigger_pct = net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta
 
     async def validate_sufficient_balance(self):

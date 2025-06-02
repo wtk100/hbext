@@ -3,6 +3,7 @@ from enum import Enum
 from typing import NamedTuple
 
 
+# 下单时能指定LIMIT MAKER吗？
 class OrderType(Enum):
     MARKET = 1
     LIMIT = 2

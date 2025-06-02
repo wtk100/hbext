@@ -173,6 +173,7 @@ class ExecutorBase(RunnableBase):
         Stops the executor and unregisters the events.
         """
         self.close_timestamp = self._strategy.current_timestamp
+        # 停止control_loop执行control_task循环并调用on_stop
         super().stop()
         self.unregister_events()
 

@@ -1,3 +1,6 @@
+########################################################################################################################
+### Time Weighted Average Price Executor: 在一段时间内以固定时间间隔打散订单来建仓，减少市场冲击；只管建仓，不管后续跟踪处理
+########################################################################################################################
 import asyncio
 import logging
 from decimal import Decimal
@@ -34,6 +37,7 @@ class TWAPExecutor(ExecutorBase):
                  max_retries: int = 15):
         super().__init__(strategy=strategy, connectors=[config.connector_name], config=config, update_interval=update_interval)
         self.config = config
+        # 先检查配置的交易额是否小于base asset最小下单数量
         trading_rules = self.get_trading_rules(config.connector_name, config.trading_pair)
         if self.config.order_amount_quote < trading_rules.min_order_size:
             self.close_execution_by(CloseType.FAILED)
@@ -48,6 +52,7 @@ class TWAPExecutor(ExecutorBase):
         self._failed_orders = []
         self._refreshed_orders = []
 
+    # 按配置生成系列订单的下单时间
     def create_order_plan(self):
         order_plan = {}
         for i in range(self.config.number_of_orders):
@@ -60,6 +65,7 @@ class TWAPExecutor(ExecutorBase):
         self.close_timestamp = self._strategy.current_timestamp
         self.stop()
 
+    # 基类ExecutorBase在on_start中调用
     def validate_sufficient_balance(self):
         mid_price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
         total_amount_base = self.config.total_amount_quote / mid_price
@@ -88,6 +94,7 @@ class TWAPExecutor(ExecutorBase):
             self.logger().error("Not enough budget to open position.")
             self.stop()
 
+    # 来自基类RunnableBase, 由其start方法调用
     async def control_task(self):
         if self.status == RunnableStatus.RUNNING:
             self.evaluate_create_order()
@@ -97,11 +104,13 @@ class TWAPExecutor(ExecutorBase):
         elif self.status == RunnableStatus.SHUTTING_DOWN:
             await self.evaluate_all_orders_closed()
 
+    # 检查订单系列中的下单时间，时间到就创建订单
     def evaluate_create_order(self):
         for timestamp, tracked_order in self._order_plan.items():
             if self._strategy.current_timestamp >= timestamp and tracked_order is None:
                 self.create_order(timestamp)
 
+    # 针对maker订单，按配置检查状态，若超时未成交就重新下单
     def evaluate_refresh_orders(self):
         if self.config.is_maker:
             for timestamp, tracked_order in self._order_plan.items():
@@ -110,6 +119,7 @@ class TWAPExecutor(ExecutorBase):
                     self._refreshed_orders.append(tracked_order)
                     self.create_order(timestamp)
 
+    # 针对maker订单，检查是否超时及触发重新下单，条件：订单未成交、且创建时间超过order_resubmission_time
     def refresh_order_condition(self, tracked_order: TrackedOrder):
         if self.config.order_resubmission_time:
             return tracked_order and tracked_order.order and tracked_order.order.is_open \
@@ -124,14 +134,21 @@ class TWAPExecutor(ExecutorBase):
 
     def create_order(self, timestamp):
         price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        # 获取以quote asset计的已开仓订单中的已成交量
         total_executed_amount = self.get_total_executed_amount_quote()
+        # 获取以quote asset计的已开仓订单中的未成交量
         open_orders_open_amount = sum([order.order.amount * order.order.price for order in self._order_plan.values() if order and order.order and not order.is_done])
+        # 计算以quote asset计，刨除已开订单，还剩多少仓位未开
         orders_amount_quote_left = self.config.total_amount_quote - total_executed_amount - open_orders_open_amount
+        # 计算还剩多少个订单未下
         number_or_orders_left = self.config.number_of_orders - len([order for order in self._order_plan.values() if order])
+        # 计算接下来下单时，每单应下数量，以base asset计
         amount = (orders_amount_quote_left / number_or_orders_left) / price
         if self.config.is_maker:
+            # 若是maker，下单价格须在市价上加上limit_order_buffer的价格优势
             order_price = price * (1 + self.config.limit_order_buffer) if self.config.side == TradeType.SELL else price * (1 - self.config.limit_order_buffer)
         else:
+            # 否则以市价下单
             order_price = price
         order_id = self.place_order(
             connector_name=self.config.connector_name,
@@ -163,7 +180,9 @@ class TWAPExecutor(ExecutorBase):
         the order plan and if it is we will move the order to the failed collection and retry with a new order.
         """
         all_orders = self._order_plan.values()
+        # next: 找到第一个符合条件的元素
         active_order = next((order for order in all_orders if order.order_id == event.order_id), None)
+        # 把self._order_plan记录的对应TrackedOrder对象置空，并记录到self._failed_orders
         if active_order:
             self._failed_orders.append(active_order)
             self._order_plan = {timestamp: None for timestamp, order in self._order_plan.items() if order == active_order}
@@ -171,7 +190,9 @@ class TWAPExecutor(ExecutorBase):
 
     def update_tracked_orders_with_order_id(self, order_id: str):
         all_orders = self._order_plan.values()
+        # next: 找到第一个符合条件的元素
         active_order = next((order for order in all_orders if order.order_id == order_id), None)
+        # 从connector获取InFlightOrder对象并更新到self._order_plan
         if active_order:
             in_flight_order = self.get_in_flight_order(self.config.connector_name, order_id)
             if in_flight_order:
@@ -190,20 +211,29 @@ class TWAPExecutor(ExecutorBase):
         if active_order:
             self.evaluate_all_orders_completed()
 
+    # 检查是否所有订单都完成
     def evaluate_all_orders_completed(self):
+        # 先检查是否所有订单都创建
         if self.evaluate_all_orders_created():
+            # 再检查是否所有订单都成交
             if all([order.order.is_filled for order in self._order_plan.values() if order and order.order]):
+                # 开仓结束就关闭Executor
                 self._status = RunnableStatus.SHUTTING_DOWN
 
     def evaluate_all_orders_created(self):
         return all([order for order in self._order_plan.values()])
 
+    # 检查refreshed_orders和failed_orders是否已关闭
     async def evaluate_all_orders_closed(self):
+        # is_done来自InFlightOrder，包括OrderState.CANCELED, OrderState.FILLED, OrderState.FAILED及成交额相关判断
+        # 这里确保refreshed_orders被cancel
         refreshed_orders_done = all([order.is_done for order in self._refreshed_orders])
+        # 这里确保failed_orders是failed的
         failed_orders_done = all([order.is_done for order in self._failed_orders])
         if refreshed_orders_done and failed_orders_done:
             self.close_execution_by(CloseType.COMPLETED)
             self._status = RunnableStatus.TERMINATED
+        # 否则下次再检查(在control_task中)
         else:
             self._current_retries += 1
             await asyncio.sleep(5)

@@ -1,3 +1,8 @@
+########################################################################################################################
+### Dollar Cost Averaging Executor: for mitigating the impact of volatility by spreading purchases or sales over time.
+### This approach can lead to a lower average cost per share or unit over time, making it a favored strategy for long-term investors.
+### 预先配置多个amounts_quote + prices
+########################################################################################################################
 import asyncio
 import logging
 import math
@@ -49,6 +54,7 @@ class DCAExecutor(ExecutorBase):
                                 f"- Current amounts base: {[amount / price for amount, price in zip(config.amounts_quote, config.prices)]} | Min order size: {trading_rules.min_order_size}")
         # set default bounds
         self.n_levels = len(config.amounts_quote)
+        # 若是TAKER订单且没配置激活区间，则设置默认激活区间
         if self.config.mode == DCAMode.TAKER and not self.config.activation_bounds:
             self.config.activation_bounds = [Decimal("0.0001"), Decimal("0.005")]  # 0.01% and 0.5%
 
@@ -74,10 +80,12 @@ class DCAExecutor(ExecutorBase):
     def active_close_orders(self) -> List[TrackedOrder]:
         return self._close_orders
 
+    # 下单模式为MAKER则开仓订单类型设为LIMIT，为TAKER则开仓订单类型设为MARKET
     @property
     def open_order_type(self) -> OrderType:
         return OrderType.LIMIT if self.config.mode == DCAMode.MAKER else OrderType.MARKET
 
+    # 清仓订单类型一律设为MARKET
     @property
     def close_order_type(self) -> OrderType:
         return OrderType.MARKET
@@ -110,6 +118,7 @@ class DCAExecutor(ExecutorBase):
     def max_amount_quote(self) -> Decimal:
         return sum(self.config.amounts_quote)
 
+    # ？若全部仓位以配置价格中的最优价建仓，相比于配置的平均成交价，应当有多少收益
     @property
     def unrealized_pnl_when_last_order_filled(self) -> Decimal:
         last_order_price = self.max_price if self.config.side == TradeType.SELL else self.min_price
@@ -135,6 +144,7 @@ class DCAExecutor(ExecutorBase):
     def max_price(self) -> Decimal:
         return max(self.config.prices)
 
+    # 止损前最多损失金额，以quote asset计
     @property
     def max_loss_quote(self) -> Decimal:
         # TODO: refactor the ExecutorBase class to handle max loss in pct and quote asset since some strategies like
@@ -146,6 +156,7 @@ class DCAExecutor(ExecutorBase):
     def current_market_price(self):
         """
         This method is responsible for getting the current market price to be used as a reference for control barriers
+        用于控制清仓操作, 所以对买方仓位是要卖, 用买一价作参考, 反之用卖一价
         """
         price_type = PriceType.BestBid if self.config.side == TradeType.BUY else PriceType.BestAsk
         return self.get_price(self.config.connector_name, self.config.trading_pair, price_type=price_type)
@@ -167,6 +178,7 @@ class DCAExecutor(ExecutorBase):
         return sum([order.average_executed_price * order.executed_amount_base for order in self._open_orders]) / \
             self.open_filled_amount if self._open_orders and self.open_filled_amount > Decimal("0") else Decimal("0")
 
+    # 计算按配置的平均成交价
     @property
     def target_position_average_price(self) -> Decimal:
         return sum([price * amount for price, amount in
@@ -195,6 +207,7 @@ class DCAExecutor(ExecutorBase):
     def is_any_amount_lower_than_min_order_size(self):
         """
         This method is responsible for checking if any amount is lower than the minimum order size
+        确保amounts_quote均不小于交易所规定的最小名义下单额(min_notional_size), 同时amount/price不小于最小下单量(min_order_size)
         """
         notional_size_check = any([amount < self.connectors[self.config.connector_name].trading_rules[self.config.trading_pair].min_notional_size for amount in self.config.amounts_quote])
         base_amount_size_check = any([amount / price < self.connectors[self.config.connector_name].trading_rules[self.config.trading_pair].min_order_size for amount, price in zip(self.config.amounts_quote, self.config.prices)])
@@ -281,6 +294,7 @@ class DCAExecutor(ExecutorBase):
         """
         next_level = len(self._open_orders)
         if next_level < self.n_levels:
+            # 当前市场价mid_price
             close_price = self.get_price(connector_name=self.config.connector_name,
                                          trading_pair=self.config.trading_pair)
             order_price = self.config.prices[next_level]
@@ -322,10 +336,12 @@ class DCAExecutor(ExecutorBase):
         will be triggered if the net pnl is lower than the stop loss.
         """
         if self.config.stop_loss:
+            # 对于MAKER模式，需要所有开仓订单成交后再止损
             if self.config.mode == DCAMode.MAKER:
                 if self.all_open_orders_executed and self.net_pnl_pct <= -self.config.stop_loss:
                     self.close_type = CloseType.STOP_LOSS
                     self.place_close_order_and_cancel_open_orders()
+            # 对于TAKER模式，直接止损
             else:
                 if self.net_pnl_quote <= -self.max_loss_quote:
                     self.close_type = CloseType.STOP_LOSS
@@ -341,14 +357,20 @@ class DCAExecutor(ExecutorBase):
         """
         if self.config.trailing_stop:
             net_pnl_pct = self.get_net_pnl_pct()
+            # 若还未初始化动态止损的触发收益率
             if not self._trailing_stop_trigger_pct:
+                # 若当前收益率 > 配置的动态止损激活收益率
                 if net_pnl_pct > self.config.trailing_stop.activation_price:
+                    # 那么动态止损的触发收益率就初始化为：当前收益率 - 配置的动态止损回撤幅度
                     self._trailing_stop_trigger_pct = net_pnl_pct - self.config.trailing_stop.trailing_delta
             else:
+                # 若当前收益率回撤到动态止损的触发收益率以下则清仓
                 if net_pnl_pct < self._trailing_stop_trigger_pct:
                     self.close_type = CloseType.TRAILING_STOP
                     self.place_close_order_and_cancel_open_orders()
+                # 若当前收益率 - 配置的动态止损回撤幅度 > 当前动态止损的触发收益率，即收益率继续上涨
                 if net_pnl_pct - self.config.trailing_stop.trailing_delta > self._trailing_stop_trigger_pct:
+                    # 那么更新动态止损的触发收益率
                     self._trailing_stop_trigger_pct = net_pnl_pct - self.config.trailing_stop.trailing_delta
 
     def control_take_profit(self):
@@ -389,6 +411,7 @@ class DCAExecutor(ExecutorBase):
         self.stop()
 
     def place_close_order(self, price):
+        # 待清仓数量，即开仓订单成交额 - 清仓订单成交额
         delta_amount_to_close = self.open_filled_amount - self.close_filled_amount
         min_order_size = self.connectors[self.config.connector_name].trading_rules[self.config.trading_pair].min_order_size
         if delta_amount_to_close >= min_order_size:
@@ -412,18 +435,25 @@ class DCAExecutor(ExecutorBase):
     def _is_within_activation_bounds(self, order_price: Decimal, close_price: Decimal) -> bool:
         """
         This method is responsible for checking if the order is within the activation bounds
+        在此Executor中只有开仓订单用到, 参数close_price是市场价mid_price
         """
         activation_bounds = self.config.activation_bounds
+        # 若订单为LIMIT
         if self.config.mode == DCAMode.MAKER:
+            # 若配置了激活边界
             if activation_bounds:
                 if self.config.side == TradeType.BUY:
+                    # 市场中间价往下第一个边界幅度后 <= 订单价 (order_price <= mid_price)
                     return order_price > close_price * (1 - activation_bounds[0])
                 else:
+                    # 市场中间价往上第一个边界幅度后 >= 订单价 (order_price >= mid_price)
                     return order_price < close_price * (1 + activation_bounds[0])
             else:
                 return True
+        # 若订单为MARKET
         elif self.config.mode == DCAMode.TAKER:
             # Taker mode requires activation bounds for safety. Default to 0.01% and 0.5% if not provided.
+            # 市场中间价在订单价激活边界内
             if self.config.side == TradeType.BUY:
                 min_price_to_buy = order_price * (1 - activation_bounds[0])
                 max_price_to_buy = order_price * (1 + activation_bounds[1])
@@ -437,16 +467,20 @@ class DCAExecutor(ExecutorBase):
         """
         This method is responsible for shutting down the process, ensuring that all orders are completed.
         """
+        # 若开仓订单成交额等于清仓成交额则直接关闭Executor
         if math.isclose(self.open_filled_amount, self.close_filled_amount):
             self.close_execution_by(self.close_type)
+        # 否则，若还有活跃的清仓订单
         elif len(self.active_close_orders) > 0:
             connector = self.connectors[self.config.connector_name]
+            # 等待connector更新清仓订单
             await connector._update_orders_with_error_handler(
                 orders=[order.order for order in self.active_close_orders if order.order],
                 error_handler=connector._handle_update_error_for_active_order
             )
             for order in self.active_close_orders:
                 self.update_tracked_orders_with_order_id(order.order_id)
+                # 检查是否有清仓订单状态是结束但未成交
                 if order.order and order.order.is_done and order.executed_amount_base == Decimal("0"):
                     self.logger().error(
                         f"Close order {order.order_id} is done, might be an error with this update. Cancelling the order and placing it again.")
@@ -454,6 +488,7 @@ class DCAExecutor(ExecutorBase):
                                           order_id=order.order_id)
                     self._close_orders.remove(order)
                     self._failed_orders.append(order)
+        # 开仓订单成交额不等于清仓成交额且没有有活跃的清仓订单，则重新尝试清仓
         else:
             self.logger().info(
                 f"Open amount: {self.open_filled_amount}, Close amount: {self.close_filled_amount}, Back up filled amount {self._total_executed_amount_backup}")
@@ -461,6 +496,7 @@ class DCAExecutor(ExecutorBase):
             self._current_retries += 1
         await asyncio.sleep(5.0)
 
+    # 用client_order_id从connector获取InFlightOrder对象并更新到self._open_orders/self._close_orders
     def update_tracked_orders_with_order_id(self, order_id: str):
         all_orders = self._open_orders + self._close_orders
         active_order = next((order for order in all_orders if order.order_id == order_id), None)

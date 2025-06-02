@@ -57,6 +57,7 @@ class RunnableBase(ABC):
         """
         if self._status != RunnableStatus.TERMINATED:
             self._status = RunnableStatus.TERMINATED
+            # terminated.set()停止control_loop执行control_task循环并调用on_stop
             self.terminated.set()
 
     async def control_loop(self):
