@@ -1,7 +1,7 @@
 ########################################################################################################################
 ### Dollar Cost Averaging Executor: for mitigating the impact of volatility by spreading purchases or sales over time.
 ### This approach can lead to a lower average cost per share or unit over time, making it a favored strategy for long-term investors.
-### 预先配置多个amounts_quote + prices
+### 预先配置多个amounts_quote + prices；跟踪管理一个仓位的整个生命周期，包括跟踪订单执行情况、按配置止盈止损，包括动态止盈
 ########################################################################################################################
 import asyncio
 import logging

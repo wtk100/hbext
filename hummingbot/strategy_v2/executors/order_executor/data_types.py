@@ -8,7 +8,11 @@ from pydantic_core.core_schema import ValidationInfo
 from hummingbot.core.data_type.common import PositionAction, TradeType
 from hummingbot.strategy_v2.executors.data_types import ExecutorConfigBase
 
-
+# 下单策略对应的价值设置:
+# LIMIT - 配置的价格
+# LIMIT MAKER - 配置的价格与市场价(买一/卖一, 非中间价)的更优者
+# MARKET - 无
+# LIMIT CHASER - 按LimitChaserConfig动态控制
 class ExecutionStrategy(Enum):
     LIMIT = "LIMIT"
     LIMIT_MAKER = "LIMIT_MAKER"
@@ -16,8 +20,11 @@ class ExecutionStrategy(Enum):
     LIMIT_CHASER = "LIMIT_CHASER"
 
 
+# limit chaser动态调整限价单来捕捉最佳交易机会(趋势跟踪策略中，通过在趋势中捕捉回撤来优化建仓成本)
 class LimitChaserConfig(BaseModel):
+    # 下单价与市场价的距离
     distance: Decimal
+    # 市场价沿趋势行进，导致下单价与市场价的距离拉大后，如果超过市场价的一定比例则重新下单(依然按distance设置下单价)
     refresh_threshold: Decimal
 
 

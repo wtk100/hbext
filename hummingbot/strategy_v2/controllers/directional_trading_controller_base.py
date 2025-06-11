@@ -172,12 +172,14 @@ class DirectionalTradingControllerBase(ControllerBase):
         actions.extend(self.stop_actions_proposal())
         return actions
 
+    # 由子类重载，根据行情数据更新signal
     async def update_processed_data(self):
         """
         Update the processed data based on the current state of the strategy. Default signal 0
         """
         self.processed_data = {"signal": 0, "features": pd.DataFrame()}
 
+    # 根据Signal创建Executor(默认的PositionExecutor会自行开始建仓、止盈止损、超时清仓并最终终止)
     def create_actions_proposal(self) -> List[ExecutorAction]:
         """
         Create actions based on the provided executor handler report.
@@ -190,8 +192,10 @@ class DirectionalTradingControllerBase(ControllerBase):
             # Default implementation distribute the total amount equally among the executors
             amount = self.config.total_amount_quote / price / Decimal(self.config.max_executors_per_side)
             trade_type = TradeType.BUY if signal > 0 else TradeType.SELL
+            # 此方法在基类control_task中被多次调用，因此会多次创建；Executor一旦创建就会开始下单
             create_actions.append(CreateExecutorAction(
                 controller_id=self.config.id,
+                # 此类返回PositionExecutorConfig
                 executor_config=self.get_executor_config(trade_type, price, amount)))
 
         return create_actions
@@ -208,6 +212,7 @@ class DirectionalTradingControllerBase(ControllerBase):
         cooldown_condition = self.market_data_provider.time() - max_timestamp > self.config.cooldown_time
         return active_executors_condition and cooldown_condition
 
+    # 由子类重载，如未重载，由Executor自行终止(默认的PositionExecutor会自行终止)
     def stop_actions_proposal(self) -> List[ExecutorAction]:
         """
         Stop actions based on the provided executor handler report.
@@ -219,6 +224,7 @@ class DirectionalTradingControllerBase(ControllerBase):
         """
         Get the executor config based on the trade_type, price and amount. This method can be overridden by the
         subclasses if required.
+        注: 这里决定使用哪个Executor, 这里默认PositionExecutorConfig
         """
         return PositionExecutorConfig(
             timestamp=self.market_data_provider.time(),

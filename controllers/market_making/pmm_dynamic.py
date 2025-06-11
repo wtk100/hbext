@@ -104,12 +104,14 @@ class PMMDynamicController(MarketMakingControllerBase):
         price_multiplier = ((0.5 * macd_signal + 0.5 * macdh_signal) * max_price_shift).iloc[-1]
         candles["spread_multiplier"] = natr
         candles["reference_price"] = candles["close"] * (1 + price_multiplier)
+        # reference_price和spread_multiplier被基类get_price_and_amount方法用于计算下单价
         self.processed_data = {
             "reference_price": Decimal(candles["reference_price"].iloc[-1]),
             "spread_multiplier": Decimal(candles["spread_multiplier"].iloc[-1]),
             "features": candles
         }
 
+    # 基类未指定Executor, 这里指定为PositionExecutor
     def get_executor_config(self, level_id: str, price: Decimal, amount: Decimal):
         trade_type = self.get_trade_type_from_level_id(level_id)
         return PositionExecutorConfig(

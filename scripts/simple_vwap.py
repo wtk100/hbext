@@ -1,3 +1,12 @@
+#################################################################################################################################
+### VWAP下单的简单示例，Takeaways:
+### 1. 如何实现VWAP下单：下市价单，按时间间隔多次下单，每次吃掉一部分挂单，每次下单量为: 以中间价偏移一定比例后为目标价，找到累计挂单量，然后
+###    以其一定比例的量下单，直到总成交量达成。
+### 2. 如何调基类ScriptStrategyBase的下单方法(而不是通过executor)
+### VWAP = Volume-Weighted Average Price, 适用于波动性大的市场, TWAP = Time-Weighted Average Price, 适用于低波动性市场
+### VWAP旨在通过将大额委托单拆分成多个小订单，在约定的时间段内分批执行，使最终成交价格尽量接近该时间段的市场成交量加权平均价格。其核心目标是
+### 最小化市场冲击成本，同时实现更接近市场平均价格的成交均价。
+#################################################################################################################################
 import logging
 import math
 import os
@@ -107,10 +116,13 @@ class VWAPExample(ScriptStrategyBase):
         vwap["trades"] = []
         vwap["status"] = "ACTIVE"
         vwap["trade_type"] = TradeType.BUY if self.vwap["is_buy"] else TradeType.SELL
+        # 从OrderBook中找出报价(is_buy时为卖一)
         vwap["start_price"] = vwap["connector"].get_price(vwap["trading_pair"], vwap["is_buy"])
+        # 用卖一/买一价算出base asset的目标成交量
         vwap["target_base_volume"] = vwap["total_volume_quote"] / vwap["start_price"]
 
         # Compute market order scenario
+        # 从OrderBook中找出满足base asset交易数量的quote asset总量(is_buy时从卖单找)
         orderbook_query = vwap["connector"].get_quote_volume_for_base_amount(vwap["trading_pair"], vwap["is_buy"],
                                                                              vwap["target_base_volume"])
         vwap["market_order_base_volume"] = orderbook_query.query_volume
@@ -126,6 +138,7 @@ class VWAPExample(ScriptStrategyBase):
          """
         # Compute the new price using the max spread allowed
         mid_price = float(self.vwap["connector"].get_mid_price(self.vwap["trading_pair"]))
+        # 计算从中间价往两边偏离price_spread后的价格
         price_multiplier = 1 + self.vwap["price_spread"] if self.vwap["is_buy"] else 1 - self.vwap["price_spread"]
         price_affected_by_spread = mid_price * price_multiplier
 
@@ -137,6 +150,7 @@ class VWAPExample(ScriptStrategyBase):
         volume_for_price = orderbook_query.result_volume
 
         # Check if the volume available is higher than the remaining
+        # 按配置的比例计算下单量
         amount = min(volume_for_price * Decimal(self.vwap["volume_perc"]), Decimal(self.vwap["volume_remaining"]))
 
         # Quantize the order amount and price

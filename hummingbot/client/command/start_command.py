@@ -231,6 +231,7 @@ class StartCommand(GatewayChainApiManager):
                                     if inspect.isclass(member) and
                                     issubclass(member, BaseClientModel) and member not in [BaseClientModel, StrategyV2ConfigBase]))
                 config = config_class(**self.load_script_yaml_config(config_file_path=self.strategy_file_name))
+                # 注：这里调用得是script_class的类方法，定义自ScriptStrategyBase
                 script_class.init_markets(config)
             except StopIteration:
                 raise InvalidScriptModule(f"The module {script_name} does not contain any subclass of BaseModel")

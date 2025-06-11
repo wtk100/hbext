@@ -41,7 +41,9 @@ class PositionSide(Enum):
 
 # For Derivatives Exchanges
 class PositionMode(Enum):
+    # 对冲模式：允许用户同时持有同一交易对的多头和空头仓位
     HEDGE = "HEDGE"
+    # 单向模式：允许用户在合约下持有一个方向的仓位，即只能是多头（long）或空头（short），不能同时持有相反方向的仓位
     ONEWAY = "ONEWAY"
 
 

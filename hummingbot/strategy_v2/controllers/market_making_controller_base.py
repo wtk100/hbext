@@ -30,12 +30,14 @@ class MarketMakingControllerConfigBase(ControllerConfigBase):
             "prompt": "Enter the trading pair to trade on (e.g., WLD-USDT): ",
             "prompt_on_new": True}
     )
+    # 买单从中间价往下偏离幅度，配置多个尝试
     buy_spreads: List[float] = Field(
         default="0.01,0.02",
         json_schema_extra={
             "prompt": "Enter a comma-separated list of buy spreads (e.g., '0.01, 0.02'): ",
             "prompt_on_new": True, "is_updatable": True}
     )
+    # 卖单从中间价往上偏离幅度，配置多个尝试
     sell_spreads: List[float] = Field(
         default="0.01,0.02",
         json_schema_extra={
@@ -200,12 +202,15 @@ class MarketMakingControllerConfigBase(ControllerConfigBase):
         total_pct = sum(buy_amounts_pct) + sum(sell_amounts_pct)
 
         # Normalize amounts_pct based on total percentages
+        # 确保buy_amounts_pct和sell_amounts_pct是正确的百分比
         if trade_type == TradeType.BUY:
             normalized_amounts_pct = [amt_pct / total_pct for amt_pct in buy_amounts_pct]
         else:  # TradeType.SELL
             normalized_amounts_pct = [amt_pct / total_pct for amt_pct in sell_amounts_pct]
 
+        # self.buy_spreads/self.sell_spreads
         spreads = getattr(self, f'{trade_type.name.lower()}_spreads')
+        # 一个spread对应一个amount
         return spreads, [amt_pct * self.total_amount_quote for amt_pct in normalized_amounts_pct]
 
     def update_markets(self, markets: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
@@ -271,6 +276,7 @@ class MarketMakingControllerBase(ControllerBase):
     def executors_to_refresh(self) -> List[ExecutorAction]:
         executors_to_refresh = self.filter_executors(
             executors=self.executors_info,
+            # 不在trading状态、活跃、超过executor刷新时间
             filter_func=lambda x: not x.is_trading and x.is_active and self.market_data_provider.time() - x.timestamp > self.config.executor_refresh_time)
 
         return [StopExecutorAction(
@@ -297,6 +303,7 @@ class MarketMakingControllerBase(ControllerBase):
     def get_executor_config(self, level_id: str, price: Decimal, amount: Decimal):
         """
         Get the executor config for a given level id.
+        注: 这里决定使用哪个Executor, 这里不提供默认Executor
         """
         raise NotImplementedError
 
@@ -307,10 +314,13 @@ class MarketMakingControllerBase(ControllerBase):
         level = self.get_level_from_level_id(level_id)
         trade_type = self.get_trade_type_from_level_id(level_id)
         spreads, amounts_quote = self.config.get_spreads_and_amounts_in_quote(trade_type)
+        # reference_price是由update_processed_data获取的市场中间价，spread_multiplier为1，子类可能有不同实现
         reference_price = Decimal(self.processed_data["reference_price"])
         spread_in_pct = Decimal(spreads[int(level)]) * Decimal(self.processed_data["spread_multiplier"])
+        # 买单下单价从中间价往下偏离，卖单下单价从中间价往上偏离
         side_multiplier = Decimal("-1") if trade_type == TradeType.BUY else Decimal("1")
         order_price = reference_price * (1 + side_multiplier * spread_in_pct)
+        # 返回下单价和下单数量
         return order_price, Decimal(amounts_quote[int(level)]) / order_price
 
     def get_level_id_from_side(self, trade_type: TradeType, level: int) -> str:
@@ -342,5 +352,6 @@ class MarketMakingControllerBase(ControllerBase):
         base_asset, quote_asset = self.config.trading_pair.split("-")
         _, amounts_quote = self.config.get_spreads_and_amounts_in_quote(TradeType.BUY)
         _, amounts_base = self.config.get_spreads_and_amounts_in_quote(TradeType.SELL)
+        # 计算卖单各level需要多少base asset, 买单各level需要多少quote asset
         return [TokenAmount(base_asset, Decimal(sum(amounts_base) / self.processed_data["reference_price"])),
                 TokenAmount(quote_asset, Decimal(sum(amounts_quote)))]

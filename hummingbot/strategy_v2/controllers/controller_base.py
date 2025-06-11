@@ -89,12 +89,14 @@ class ControllerConfigBase(BaseClientModel):
                 configs.append(config)
         return configs
 
+    # 由子类重载， [connector, [trading_pair]]
     def update_markets(self, markets: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
         """
         Update the markets dict of the script from the config.
         """
         return markets
 
+    # 从ControllerConfigBase的子类所在module(.py文件)识别ControllerBase的子类
     def get_controller_class(self):
         """
         Dynamically load and return the controller class based on the controller configuration.
@@ -145,6 +147,7 @@ class ControllerBase(RunnableBase):
     def get_balance_requirements(self) -> List[TokenAmount]:
         """
         Get the balance requirements for the controller.
+        DirectionalTradingController没有实现, MarketMakingController有实现
         """
         return []
 
@@ -160,7 +163,9 @@ class ControllerBase(RunnableBase):
 
     async def control_task(self):
         if self.market_data_provider.ready and self.executors_update_event.is_set():
+            # 子类实现
             await self.update_processed_data()
+            # 子类实现
             executor_actions: List[ExecutorAction] = self.determine_executor_actions()
             if len(executor_actions) > 0:
                 self.logger().debug(f"Sending actions: {executor_actions}")
@@ -168,6 +173,7 @@ class ControllerBase(RunnableBase):
 
     async def send_actions(self, executor_actions: List[ExecutorAction]):
         if len(executor_actions) > 0:
+            # 由StrategyV2Base获取actions_queue中的executor_actions(listen_to_executor_actions)并调executor_orchestrator执行
             await self.actions_queue.put(executor_actions)
             self.executors_update_event.clear()  # Clear the event after sending the actions
 

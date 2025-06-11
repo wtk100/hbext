@@ -93,7 +93,7 @@ cdef class Clock:
                 (<TimeIterator>iterator).c_stop(self)
         self._current_context = None
 
-    # 由？？？添加iterator
+    # 由start_command添加iterator
     def add_iterator(self, iterator: TimeIterator):
         """
         添加时间迭代器到_current_context和_child_iterators

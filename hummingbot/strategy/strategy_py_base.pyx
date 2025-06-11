@@ -1,3 +1,12 @@
+###################################################################################################################################
+### 注：这里新增定义虚方法start/tick/stop，分别被c_xxxx调用，其中：
+### start:直到StrategyV2Base都没实现，待最终的script类实现，如FundingRateArbitrage、GenericV2StrategyWithCashOut(子类中均无on_start方法)
+### tick: 被直接子类ScriptStrategyBase实现，并新增on_tick虚方法，由tick调用
+### stop: 直到StrategyV2Base都没实现，但直接子类ScriptStrategyBase新增on_stop虚方法，StrategyV2Base实现了on_stop方法
+###
+### StartCommand的start_market_making方法将strategy绑定到时钟后随即启动时钟，start/tick即开始被调用
+### StopCommand的stop_loop方法会调用on_stop方法
+###################################################################################################################################
 from hummingbot.strategy.strategy_base cimport StrategyBase
 from hummingbot.core.clock import Clock
 from hummingbot.core.clock cimport Clock

@@ -22,6 +22,7 @@ class PMMSimpleController(MarketMakingControllerBase):
         super().__init__(config, *args, **kwargs)
         self.config = config
 
+    # 基类未指定Executor, 这里指定为PositionExecutor
     def get_executor_config(self, level_id: str, price: Decimal, amount: Decimal):
         trade_type = self.get_trade_type_from_level_id(level_id)
         return PositionExecutorConfig(

@@ -206,6 +206,7 @@ class MarketsRecorder:
         if self._market_data_collection_task is not None:
             self._market_data_collection_task.cancel()
 
+    # 向数据库新增或更新Executor信息
     def store_or_update_executor(self, executor):
         with self._sql_manager.get_new_session() as session:
             existing_executor = session.query(Executors).filter(Executors.id == executor.config.id).one_or_none()

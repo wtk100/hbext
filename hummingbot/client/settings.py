@@ -70,7 +70,7 @@ class ConnectorType(Enum):
     Derivative = "derivative"
 
 
-# DEX连接配置文件相关操作
+# Gateway连接配置文件相关操作
 class GatewayConnectionSetting:
     # 获取gateway_connections.json文件路径
     @staticmethod
@@ -164,7 +164,7 @@ class GatewayConnectionSetting:
         GatewayConnectionSetting.save(connectors_conf)
 
 
-# 交易所连接配置内容
+# Non Gateway交易所连接配置内容
 class ConnectorSetting(NamedTuple):
     name: str
     type: ConnectorType

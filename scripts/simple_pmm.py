@@ -1,3 +1,8 @@
+###############################################################################################################
+### PMM(pure market making)的简单示例，Takeaways:
+### 1. 如何根据可用余额调整订单金额
+### 2. 如何调基类ScriptStrategyBase的下单方法(而不是通过executor)
+###############################################################################################################
 import logging
 import os
 from decimal import Decimal
@@ -18,7 +23,9 @@ class SimplePMMConfig(BaseClientModel):
     exchange: str = Field("binance_paper_trade")
     trading_pair: str = Field("ETH-USDT")
     order_amount: Decimal = Field(0.01)
+    # 从中间价往下走多少下买单
     bid_spread: Decimal = Field(0.001)
+    # 从中间价往上走多少下卖单
     ask_spread: Decimal = Field(0.001)
     order_refresh_time: int = Field(15)
     price_type: str = Field("mid")

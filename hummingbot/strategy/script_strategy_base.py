@@ -1,3 +1,9 @@
+##############################################################################################################
+### ScriptStrategy的基类，相比StrategyPyBase(StrategyBase)增加：
+### 1. 增加初始化参数：connectors和config
+### 2. 实现tick函数，增加检查所有connector连接是否ready
+### 3. 定义获取active limit order df的方法
+##############################################################################################################
 import logging
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set
@@ -31,6 +37,7 @@ class ScriptStrategyBase(StrategyPyBase):
     """
 
     # This class member defines connectors and their trading pairs needed for the strategy operation,
+    # 由子类在init_markets里初始化，会用于构建List[MarketTradingPairTuple]
     markets: Dict[str, Set[str]]
 
     @classmethod
@@ -55,6 +62,7 @@ class ScriptStrategyBase(StrategyPyBase):
         super().__init__()
         self.connectors: Dict[str, ConnectorBase] = connectors
         self.ready_to_trade: bool = False
+        # 方法来自基类
         self.add_markets(list(connectors.values()))
         self.config = config
 
@@ -62,6 +70,7 @@ class ScriptStrategyBase(StrategyPyBase):
         """
         Clock tick entry point, is run every second (on normal tick setting).
         Checks if all connectors are ready, if so the strategy is ready to trade.
+        方法由基类加入, 最终由clock调用; StartCommand.start_market_making方法会启动时钟并挂钩strategy(及connector)以驱动其定时任务.
 
         :param timestamp: current tick timestamp
         """
@@ -181,6 +190,7 @@ class ScriptStrategyBase(StrategyPyBase):
     def get_balance_df(self) -> pd.DataFrame:
         """
         Returns a data frame for all asset balances for displaying purpose.
+        与基类的wallet_balance_data_frame没有区别??
         """
         columns: List[str] = ["Exchange", "Asset", "Total Balance", "Available Balance"]
         data: List[Any] = []

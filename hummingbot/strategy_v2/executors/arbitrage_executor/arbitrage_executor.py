@@ -1,3 +1,6 @@
+########################################################################################################################
+### 套利Executor: 在2个connector同时低买高卖等量标的(一次性)，两边都是市价单，即两边订单簿都有订单已经存在
+########################################################################################################################
 import asyncio
 import logging
 from decimal import Decimal
@@ -47,6 +50,7 @@ class ArbitrageExecutor(ExecutorBase):
                  config: ArbitrageExecutorConfig,
                  update_interval: float = 1.0,
                  max_retries: int = 3):
+        # 检查base asset是否interchangeable，套利只针对不同交易所间interchangeable的base asset
         if not self.is_arbitrage_valid(pair1=config.buying_market.trading_pair,
                                        pair2=config.selling_market.trading_pair):
             raise Exception("Arbitrage is not valid since the trading pairs are not interchangeable.")
@@ -116,6 +120,7 @@ class ArbitrageExecutor(ExecutorBase):
         base_asset2, quote_asset2 = split_hb_trading_pair(pair2)
         return self._are_tokens_interchangeable(base_asset1, base_asset2)
 
+    # 以quote asset计的净收益额：卖出金额 - 买入金额 - 总费用 = 现金变动额
     def get_net_pnl_quote(self) -> Decimal:
         if self.close_type == CloseType.COMPLETED:
             sell_quote_amount = self.sell_order.order.executed_amount_base * self.sell_order.average_executed_price
@@ -124,7 +129,9 @@ class ArbitrageExecutor(ExecutorBase):
         else:
             return Decimal("0")
 
+    # 净收益率：quote asset变动额 / base asset交易数量
     def get_net_pnl_pct(self) -> Decimal:
+        # self.is_closed -> RunnableStatus.TERMINATED
         if self.is_closed:
             if self.buy_order.order and self.buy_order.order.executed_amount_base > 0:
                 return self.net_pnl_quote / self.buy_order.order.executed_amount_base
@@ -159,13 +166,17 @@ class ArbitrageExecutor(ExecutorBase):
     async def control_task(self):
         if self.status == RunnableStatus.RUNNING:
             try:
+                # 计算self._trade_pnl_pct = (卖价 - 买价)/买价
                 await self.update_trade_pnl_pct()
+                # 计算self._last_tx_cost，从connector预计算完成买卖交易共需交易费用金额
                 await self.update_tx_cost()
+                # 扣除交易费后的净收益率(quote asset变动额 / base asset交易数量)
                 self._current_profitability = (self._trade_pnl_pct * self.order_amount - self._last_tx_cost) / self.order_amount
                 if self._current_profitability > self.min_profitability:
                     await self.execute_arbitrage()
             except Exception as e:
                 self.logger().error(f"Error calculating profitability: {e}")
+        # execute_arbitrage后RunnableStatus就设为SHUTTING_DOWN
         elif self.status == RunnableStatus.SHUTTING_DOWN:
             if self._cumulative_failures > self.max_retries:
                 self.close_type = CloseType.FAILED
@@ -189,6 +200,7 @@ class ArbitrageExecutor(ExecutorBase):
         self.place_sell_arbitrage_order()
 
     def place_buy_arbitrage_order(self):
+        # 注：下市价单
         self.buy_order.order_id = self.place_order(
             connector_name=self.buying_market.connector_name,
             trading_pair=self.buying_market.trading_pair,
@@ -199,6 +211,7 @@ class ArbitrageExecutor(ExecutorBase):
         )
 
     def place_sell_arbitrage_order(self):
+        # 注：下市价单
         self.sell_order.order_id = self.place_order(
             connector_name=self.selling_market.connector_name,
             trading_pair=self.selling_market.trading_pair,
@@ -272,12 +285,14 @@ class ArbitrageExecutor(ExecutorBase):
             self.logger().error(f"Error fetching conversion rate for {self.quote_conversion_pair}: {e}")
             raise
 
+    # 从connector预计算一笔交易需要的交易费用
     async def get_tx_cost_in_asset(self, exchange: str, trading_pair: str, is_buy: bool, order_amount: Decimal,
                                    asset: str):
         connector = self.connectors[exchange]
         price = await self.get_resulting_price_for_amount(exchange, trading_pair, is_buy, order_amount)
         if self.is_amm_connector(exchange=exchange):
             gas_cost = connector.network_transaction_fee
+            # gas_cost.amount为gas数量
             return gas_cost.amount / self.config.gas_conversion_price
         else:
             fee = connector.get_fee(

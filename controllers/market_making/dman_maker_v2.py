@@ -85,11 +85,13 @@ class DManMakerV2(MarketMakingControllerBase):
     def executors_to_refresh(self) -> List[ExecutorAction]:
         executors_to_refresh = self.filter_executors(
             executors=self.executors_info,
+            # 不在trading状态、活跃、超过普通executor刷新时间或超过第一层executor刷新时间
             filter_func=lambda x: not x.is_trading and x.is_active and (self.order_level_refresh_condition(x) or self.first_level_refresh_condition(x)))
         return [StopExecutorAction(
             controller_id=self.config.id,
             executor_id=executor.id) for executor in executors_to_refresh]
 
+    # 下单价格与基类不同: 基类是对买单、卖单分别指定spreads, 这里买单卖单指定同样的spreads
     def get_executor_config(self, level_id: str, price: Decimal, amount: Decimal):
         trade_type = self.get_trade_type_from_level_id(level_id)
         if trade_type == TradeType.BUY:
@@ -98,6 +100,7 @@ class DManMakerV2(MarketMakingControllerBase):
             prices = [price * (1 + spread) for spread in self.spreads]
         amounts = [amount * pct for pct in self.dca_amounts_pct]
         amounts_quote = [amount * price for amount, price in zip(amounts, prices)]
+        # 基类未指定Executor, 这里指定为DCAExecutor
         return DCAExecutorConfig(
             timestamp=self.market_data_provider.time(),
             connector_name=self.config.connector_name,

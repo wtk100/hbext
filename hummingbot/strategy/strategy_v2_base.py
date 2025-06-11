@@ -1,3 +1,11 @@
+###################################################################################################################################
+### StrategyV2的基类，相比ScriptStrategyBase增加：
+### 1. 增加strategy配置信息维护的类定义StrategyV2ConfigBase， 内含markets、candles、controllers配置
+### 2. 维护controllers，包括读取配置(包括运行期间的配置更新)、创建(包括传递market_data_provider)、关闭，并从controllers获取ExecutorAction
+### 3. 调用executor_orchestrator来维护executors，包括创建、关闭、存executor信息到数据库
+###    注：这里CreateExecutorAction有两种来源: 1.由controllers创建 2.自身的create_actions_proposal创建(在on_tick中)
+### 注：这里新增on_tick方法的实现, on_stop定义
+###################################################################################################################################
 import asyncio
 import importlib
 import inspect
@@ -161,11 +169,16 @@ class StrategyV2ConfigBase(BaseClientModel):
 class StrategyV2Base(ScriptStrategyBase):
     """
     V2StrategyBase is a base class for strategies that use the new smart components architecture.
+    注: 以下为类变量
     """
     markets: Dict[str, Set[str]]
+    # 用于决定是否从contorller config文件获取更新
     _last_config_update_ts: float = 0
+    # ExecutorOrchestrator批量存储已关闭的executors信息batch size
     closed_executors_buffer: int = 100
+    # 等待所有executors关闭的尝试次数
     max_executors_close_attempts: int = 10
+    # 从contorller config文件获取更新的时间间隔
     config_update_interval: int = 10
 
     @classmethod
@@ -177,6 +190,7 @@ class StrategyV2Base(ScriptStrategyBase):
         markets = config.markets
         controllers_configs = config.load_controller_configs()
         for controller_config in controllers_configs:
+            # controller_config.update_markets会将control config配置了但markets参数里没有的markets及其trading pairs添加后一并返回
             markets = controller_config.update_markets(markets)
         cls.markets = markets
 
@@ -190,6 +204,8 @@ class StrategyV2Base(ScriptStrategyBase):
         self.positions_held: Dict[str, List] = {}
 
         # Create a queue to listen to actions from the controllers
+        # ExecutorAction对象的队列，会用于初始化controller, 同时controller放进去的actions被listen_to_executor_actions处理
+        # CreateExecutorAction/StopExecutorAction/StoreExecutorAction
         self.actions_queue = asyncio.Queue()
         self.listen_to_executor_actions_task: asyncio.Task = asyncio.create_task(self.listen_to_executor_actions())
 
@@ -220,6 +236,7 @@ class StrategyV2Base(ScriptStrategyBase):
     def update_controllers_configs(self):
         """
         Update the controllers configurations based on the provided configuration.
+        on_tick调用, 定期检查所有controller config配置文件的更改
         """
         if self._last_config_update_ts + self.config_update_interval < self.current_timestamp:
             self._last_config_update_ts = self.current_timestamp
@@ -233,15 +250,18 @@ class StrategyV2Base(ScriptStrategyBase):
     async def listen_to_executor_actions(self):
         """
         Asynchronously listen to actions from the controllers and execute them.
+        从self.actions_queue获取ExecutorAction(由controller放进去), 并调executor_orchestrator执行创建和停止executor的动作
         """
         while True:
             try:
                 actions = await self.actions_queue.get()
                 self.executor_orchestrator.execute_actions(actions)
+                # 执行创建和停止executor的动作后，把executors_info更新到controller里
                 self.update_executors_info()
                 controller_id = actions[0].controller_id
                 controller = self.controllers.get(controller_id)
                 controller.executors_info = self.executors_info.get(controller_id, [])
+                # executors_update_event被set后controller的control_task内任务才运行，运行后随即被clear
                 controller.executors_update_event.set()
             except asyncio.CancelledError:
                 raise
@@ -253,6 +273,7 @@ class StrategyV2Base(ScriptStrategyBase):
         Update the local state of the executors and publish the updates to the active controllers.
         In this case we are going to update the controllers directly with the executors info so the event is not
         set and is managed with the async queue.
+        更新自己及controllers里的executors_info和positions_held
         """
         try:
             self.executors_info = self.executor_orchestrator.get_executors_report()
@@ -301,12 +322,14 @@ class StrategyV2Base(ScriptStrategyBase):
     def create_actions_proposal(self) -> List[CreateExecutorAction]:
         """
         Create actions proposal based on the current state of the executors.
+        如果用controller则应由controller来创建CreateExecutorAction, 否则strategy自己创建
         """
         raise NotImplementedError
 
     def stop_actions_proposal(self) -> List[StopExecutorAction]:
         """
         Create a list of actions to stop the executors based on order refresh and early stop conditions.
+        如果用controller则应由controller来创建StopExecutorAction, 否则strategy自己创建
         """
         raise NotImplementedError
 

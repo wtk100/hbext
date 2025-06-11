@@ -1,3 +1,9 @@
+##############################################################################################################
+### Strategy的总基类，主要负责：
+### 1. 定义增删market及其上的各种EventListener的方法, 以及从market获取历史成交、报价、余额, 下订单、取消订单的方法
+### 2. 定义围绕Order Tracker实现的TimeIterator方法：c_start, c_tick, c_stop
+### 3. 定义各种订单、仓位的事件处理函数(由EventListener调用)
+##############################################################################################################
 from decimal import Decimal
 import logging
 import pandas as pd
@@ -202,6 +208,7 @@ cdef class StrategyBase(TimeIterator):
                          order_filled_event.timestamp,
                          order_filled_event.trade_fee)
         past_trades = []
+        # 从所有connectors获取OrderFilledEvent并转Trade对象返回
         for market in self.active_markets:
             event_logs = market.event_logs
             order_filled_events = list(filter(lambda e: isinstance(e, OrderFilledEvent), event_logs))
@@ -218,6 +225,7 @@ cdef class StrategyBase(TimeIterator):
             object bid_price
             object ask_price
             list markets_data = []
+            # 注：Market列是trading_pair
             list markets_columns = ["Exchange", "Market", "Best Bid Price", "Best Ask Price", "Mid Price"]
         try:
             for market_trading_pair_tuple in market_trading_pair_tuples:
@@ -310,10 +318,12 @@ cdef class StrategyBase(TimeIterator):
         self._sb_order_tracker.c_stop(clock)
         self.c_remove_markets(list(self._sb_markets))
 
+    # 由子类初始化函数调用
     cdef c_add_markets(self, list markets):
         cdef:
             ConnectorBase typed_market
 
+        # 为connectors添加各种event listener，并把connectors添加到self._sb_markets
         for market in markets:
             typed_market = market
             typed_market.c_add_listener(self.BUY_ORDER_CREATED_EVENT_TAG, self._sb_create_buy_order_listener)
@@ -342,6 +352,7 @@ cdef class StrategyBase(TimeIterator):
         cdef:
             ConnectorBase typed_market
 
+        # 从connectors移除各种event listener，并从self._sb_markets移除connectors
         for market in markets:
             typed_market = market
             if typed_market not in self._sb_markets:
@@ -372,6 +383,7 @@ cdef class StrategyBase(TimeIterator):
 
         """
         Converts flat fees to quote token and sums up all flat fees
+        flat fee: 固定费用
         """
         cdef:
             object total_flat_fees = s_decimal_0
@@ -455,6 +467,7 @@ cdef class StrategyBase(TimeIterator):
 
     # <editor-fold desc="+ Order tracking event handlers">
     # ----------------------------------------------------------------------------------------------------------
+    # 在OrderFailedListener中，与c_did_fail_order一同被call
     cdef c_did_fail_order_tracker(self, object order_failed_event):
         cdef:
             str order_id = order_failed_event.order_id
@@ -466,6 +479,7 @@ cdef class StrategyBase(TimeIterator):
         elif order_type == OrderType.MARKET:
             self.c_stop_tracking_market_order(market_pair, order_id)
 
+    # 在OrderCancelledListener中，与c_did_cancel_order一同被call
     cdef c_did_cancel_order_tracker(self, object order_cancelled_event):
         cdef:
             str order_id = order_cancelled_event.order_id
@@ -473,9 +487,11 @@ cdef class StrategyBase(TimeIterator):
 
         self.c_stop_tracking_limit_order(market_pair, order_id)
 
+    # 在OrderExpiredListener中，与c_did_expire_order一同被call
     cdef c_did_expire_order_tracker(self, object order_expired_event):
         self.c_did_cancel_order_tracker(order_expired_event)
 
+    # 在BuyOrderCompletedListener中，与c_did_complete_buy_order一同被call
     cdef c_did_complete_buy_order_tracker(self, object order_completed_event):
         cdef:
             str order_id = order_completed_event.order_id
@@ -497,6 +513,7 @@ cdef class StrategyBase(TimeIterator):
     # <editor-fold desc="+ Creating and canceling orders">
     # ----------------------------------------------------------------------------------------------------------
 
+    # strategy直接下买单
     def buy_with_specific_market(self, market_trading_pair_tuple, amount,
                                  order_type=OrderType.MARKET,
                                  price=s_decimal_nan,
@@ -542,6 +559,7 @@ cdef class StrategyBase(TimeIterator):
 
         return order_id
 
+    # strategy直接下卖单
     def sell_with_specific_market(self, market_trading_pair_tuple, amount,
                                   order_type=OrderType.MARKET,
                                   price=s_decimal_nan,
@@ -631,6 +649,7 @@ cdef class StrategyBase(TimeIterator):
     def stop_tracking_market_order(self, market_pair: MarketTradingPairTuple, order_id: str):
         self.c_stop_tracking_market_order(market_pair, order_id)
 
+    # 从connector获取limit order并开始track
     cdef c_track_restored_orders(self, object market_pair):
         cdef:
             list limit_orders = market_pair.market.limit_orders

@@ -10,4 +10,5 @@ class ArbitrageExecutorConfig(ExecutorConfigBase):
     selling_market: ConnectorPair
     order_amount: Decimal
     min_profitability: Decimal
+    # gas与现金的比值
     gas_conversion_price: Optional[Decimal] = None

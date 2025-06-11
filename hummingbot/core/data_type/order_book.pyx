@@ -308,6 +308,7 @@ cdef class OrderBook(PubSub):
                 break
         return retval
 
+    # 若is_buy, 返回卖一，否则返回买一
     cdef double c_get_price(self, bint is_buy) except? -1:
         cdef:
             set[OrderBookEntry] *book = ref(self._ask_book) if is_buy else ref(self._bid_book)
@@ -318,6 +319,7 @@ cdef class OrderBook(PubSub):
     def get_price(self, is_buy: bool) -> float:
         return self.c_get_price(is_buy)
 
+    # 从OrderBook中找出满足base asset交易数量的最后一个价格
     cdef OrderBookQueryResult c_get_price_for_volume(self, bint is_buy, double volume):
         cdef:
             double cumulative_volume = 0
@@ -338,6 +340,7 @@ cdef class OrderBook(PubSub):
 
         return OrderBookQueryResult(NaN, volume, result_price, min(cumulative_volume, volume))
 
+    # 从OrderBook中找出满足交易数量的加权平均价格
     cdef OrderBookQueryResult c_get_vwap_for_volume(self, bint is_buy, double volume):
         cdef:
             double total_cost = 0
@@ -370,6 +373,7 @@ cdef class OrderBook(PubSub):
 
         return OrderBookQueryResult(NaN, volume, result_vwap, min(total_volume, volume))
 
+    # 从OrderBook中找出满足quote asset交易数量的最后一个价格
     cdef OrderBookQueryResult c_get_price_for_quote_volume(self, bint is_buy, double quote_volume):
         cdef:
             double cumulative_volume = 0
@@ -390,6 +394,7 @@ cdef class OrderBook(PubSub):
 
         return OrderBookQueryResult(NaN, quote_volume, result_price, min(cumulative_volume, quote_volume))
 
+    # 从OrderBook中找出满足base asset交易数量的quote asset总量
     cdef OrderBookQueryResult c_get_quote_volume_for_base_amount(self, bint is_buy, double base_amount):
         cdef:
             double cumulative_volume = 0
@@ -417,6 +422,7 @@ cdef class OrderBook(PubSub):
 
         return OrderBookQueryResult(NaN, base_amount, NaN, cumulative_volume)
 
+    # 从OrderBook中找出吃单到目标价时base asset交易数量总和
     cdef OrderBookQueryResult c_get_volume_for_price(self, bint is_buy, double price):
         cdef:
             double cumulative_volume = 0
@@ -437,6 +443,7 @@ cdef class OrderBook(PubSub):
 
         return OrderBookQueryResult(price, NaN, result_price, cumulative_volume)
 
+    # 从OrderBook中找出吃单到目标价时quote asset交易数量总和
     cdef OrderBookQueryResult c_get_quote_volume_for_price(self, bint is_buy, double price):
         cdef:
             double cumulative_volume = 0

@@ -1,3 +1,10 @@
+#################################################################################################################################
+### XEMM简单示例，Takeaways:
+### 1. 如何实现XEMM简单逻辑：指定固定的做市交易所(一般为流动性较差的，下maker单)、对冲交易所(一般为流动性较好的，下taker单); 持续根据对冲交
+###    易所标的买价和卖价计算固定价差的做市价格，并在做市交易所下maker单，一旦成交立刻在对冲交易所下taker单；做市交易所下买单则在对冲交易
+###    所下卖单，做市交易所下卖单则在对冲交易所下买单；始终做近似同步的低买高卖操作。
+### 2. 如何调基类ScriptStrategyBase的下单方法(而不是通过executor)
+#################################################################################################################################
 import os
 from decimal import Decimal
 from typing import Dict
@@ -25,8 +32,10 @@ class SimpleXEMMConfig(BaseClientModel):
         "prompt": "Taker pair where the bot will hedge filled orders", "prompt_on_new": True})
     order_amount: Decimal = Field(0.1, json_schema_extra={
         "prompt": "Order amount (denominated in base asset)", "prompt_on_new": True})
+    # 用于计算做市价的买卖价差
     spread_bps: Decimal = Field(10, json_schema_extra={
         "prompt": "Spread between maker and taker orders (in basis points)", "prompt_on_new": True})
+    # 用于计算是否取消未成交做市单的买卖价差，即能接受的最小盈利
     min_spread_bps: Decimal = Field(0, json_schema_extra={
         "prompt": "Minimum spread (in basis points)", "prompt_on_new": True})
     slippage_buffer_spread_bps: Decimal = Field(100, json_schema_extra={
@@ -58,21 +67,29 @@ class SimpleXEMM(ScriptStrategyBase):
         self.config = config
 
     def on_tick(self):
+        # 获取对冲交易所的卖价，即能以taker方式在对冲交易所买成多少价格
         taker_buy_result = self.connectors[self.config.taker_exchange].get_price_for_volume(self.config.taker_pair, True, self.config.order_amount)
+        # 获取对冲交易所的买价，即能以taker方式在对冲交易所卖出多少价格
         taker_sell_result = self.connectors[self.config.taker_exchange].get_price_for_volume(self.config.taker_pair, False, self.config.order_amount)
 
         if not self.buy_order_placed:
+            # 根据能在对冲交易所卖出的价格计算在做市交易所买进的价格(减spread_bps)
             maker_buy_price = taker_sell_result.result_price * Decimal(1 - self.config.spread_bps / 10000)
+            # buy_hedging_budget获取在对冲交易所的base asset余额，即能卖出的标的余额
             buy_order_amount = min(self.config.order_amount, self.buy_hedging_budget())
 
+            # 在做市交易所下限价买单
             buy_order = OrderCandidate(trading_pair=self.config.maker_pair, is_maker=True, order_type=OrderType.LIMIT, order_side=TradeType.BUY, amount=Decimal(buy_order_amount), price=maker_buy_price)
             buy_order_adjusted = self.connectors[self.config.maker_exchange].budget_checker.adjust_candidate(buy_order, all_or_none=False)
             self.buy(self.config.maker_exchange, self.config.maker_pair, buy_order_adjusted.amount, buy_order_adjusted.order_type, buy_order_adjusted.price)
             self.buy_order_placed = True
 
         if not self.sell_order_placed:
+            # 根据能在对冲交易所买进的价格计算在做市交易所卖出的价格(加spread_bps)
             maker_sell_price = taker_buy_result.result_price * Decimal(1 + self.config.spread_bps / 10000)
+            # sell_hedging_budget获取能在对冲交易所买进多少base asset
             sell_order_amount = min(self.config.order_amount, self.sell_hedging_budget())
+            # 在做市交易所下限价卖单
             sell_order = OrderCandidate(trading_pair=self.config.maker_pair, is_maker=True, order_type=OrderType.LIMIT, order_side=TradeType.SELL, amount=Decimal(sell_order_amount), price=maker_sell_price)
             sell_order_adjusted = self.connectors[self.config.maker_exchange].budget_checker.adjust_candidate(sell_order, all_or_none=False)
             self.sell(self.config.maker_exchange, self.config.maker_pair, sell_order_adjusted.amount, sell_order_adjusted.order_type, sell_order_adjusted.price)
@@ -82,12 +99,14 @@ class SimpleXEMM(ScriptStrategyBase):
             cancel_timestamp = order.creation_timestamp / 1000000 + self.config.max_order_age
             if order.is_buy:
                 buy_cancel_threshold = taker_sell_result.result_price * Decimal(1 - self.config.min_spread_bps / 10000)
+                # 做市单买价与市价单卖价已不足以cover最小盈利
                 if order.price > buy_cancel_threshold or cancel_timestamp < self.current_timestamp:
                     self.logger().info(f"Cancelling buy order: {order.client_order_id}")
                     self.cancel(self.config.maker_exchange, order.trading_pair, order.client_order_id)
                     self.buy_order_placed = False
             else:
                 sell_cancel_threshold = taker_buy_result.result_price * Decimal(1 + self.config.min_spread_bps / 10000)
+                # 做市单卖价与市价单买价已不足以cover最小盈利
                 if order.price < sell_cancel_threshold or cancel_timestamp < self.current_timestamp:
                     self.logger().info(f"Cancelling sell order: {order.client_order_id}")
                     self.cancel(self.config.maker_exchange, order.trading_pair, order.client_order_id)

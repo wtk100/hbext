@@ -64,13 +64,17 @@ class BollingerV1Controller(DirectionalTradingControllerBase):
             )]
         super().__init__(config, *args, **kwargs)
 
+    # 此方法根据行情生成signal，基类的create_actions_proposal方法随后根据signal创建新Executor(默认PositionExecutor)
     async def update_processed_data(self):
+        # 获取max_records条candle记录，布林带计算需要
         df = self.market_data_provider.get_candles_df(connector_name=self.config.candles_connector,
                                                       trading_pair=self.config.candles_trading_pair,
                                                       interval=self.config.interval,
                                                       max_records=self.max_records)
         # Add indicators
+        # 加指标列到df上
         df.ta.bbands(length=self.config.bb_length, std=self.config.bb_std, append=True)
+        # 加到df上的新列
         bbp = df[f"BBP_{self.config.bb_length}_{self.config.bb_std}"]
 
         # Generate signal
@@ -78,10 +82,15 @@ class BollingerV1Controller(DirectionalTradingControllerBase):
         short_condition = bbp > self.config.bb_short_threshold
 
         # Generate signal
+        # 加signal列
         df["signal"] = 0
+        # 指标满足做多条件，signal列置为1
         df.loc[long_condition, "signal"] = 1
+        # 指标满足做空条件，signal列置为-1
         df.loc[short_condition, "signal"] = -1
 
         # Update processed data
+        # 取最新的一个signal值
         self.processed_data["signal"] = df["signal"].iloc[-1]
+        # 用于状态更新(to_format_status)
         self.processed_data["features"] = df

@@ -1,3 +1,7 @@
+#################################################################################################################################
+### 用K线模拟MM的简单示例，Takeaways:
+### 1. 如何使用历史K线数据
+#################################################################################################################################
 import logging
 from datetime import datetime
 
@@ -59,7 +63,7 @@ class BacktestMM(ScriptStrategyBase):
             df['quote_delta'] = df['sell_amount'] * df['ask_price'] - df['buy_amount'] * df['bid_price'] - df['fees_paid']
 
         if self.candle.ready and self.results_df is None:
-            df.to_csv(self.csv_path, index=False)
+            df.to_csv(self.csv_path, index=False)   
             self.results_df = df
             msg = "Backtesting complete - run 'status' to see results."
             self.log_with_clock(logging.INFO, msg)

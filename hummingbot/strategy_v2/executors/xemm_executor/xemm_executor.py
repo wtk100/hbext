@@ -1,3 +1,8 @@
+#################################################################################################################################
+### Cross Exchange Market Make: 在2个connector近同时低买高卖等量标的(一次性)，一边下maker单一边下taker单，等到maker单成交的同时下taker单
+### 例1：有人在A交易所要卖100没成交，我在B交易所做卖方maker，挂110限价卖单，后续若成交立刻在A做买方taker，挂市价单以100买回来
+### 例1：有人在A交易所出100买没成交，我在B交易所做买方maker，挂90限价买单，后续若成交立刻在A做卖方taker，挂市价单以100卖出
+#################################################################################################################################
 import asyncio
 import logging
 from decimal import Decimal
@@ -62,6 +67,7 @@ class XEMMExecutor(ExecutorBase):
             raise Exception("XEMM is not valid since the trading pairs are not interchangeable.")
         self.config = config
         self.rate_oracle = RateOracle.get_instance()
+        # 若配置为买方，则在买单上做maker、卖单上做taker
         if config.maker_side == TradeType.BUY:
             self.maker_connector = config.buying_market.connector_name
             self.maker_trading_pair = config.buying_market.trading_pair
@@ -69,6 +75,7 @@ class XEMMExecutor(ExecutorBase):
             self.taker_connector = config.selling_market.connector_name
             self.taker_trading_pair = config.selling_market.trading_pair
             self.taker_order_side = TradeType.SELL
+        # 若配置为卖方，则在卖单上做maker、买单上做taker
         else:
             self.maker_connector = config.selling_market.connector_name
             self.maker_trading_pair = config.selling_market.trading_pair
@@ -82,6 +89,7 @@ class XEMMExecutor(ExecutorBase):
         _, taker_quote = split_hb_trading_pair(self.taker_trading_pair)
         self.quote_conversion_pair = f"{taker_quote}-{maker_quote}"
 
+        # 检查taker市场是否支持市价单
         taker_connector = strategy.connectors[self.taker_connector]
         if not self.is_amm_connector(exchange=self.taker_connector):
             if OrderType.MARKET not in taker_connector.supported_order_types():
@@ -144,9 +152,12 @@ class XEMMExecutor(ExecutorBase):
             is_buy=self.taker_order_side == TradeType.BUY,
             order_amount=self.config.order_amount)
         await self.update_tx_costs()
+        # 根据taker市场价反算maker应该限价多少
         if self.taker_order_side == TradeType.BUY:
+            # 若taker是买方，那么maker是卖方，应当多卖出(target_profitability + _tx_cost_pct)
             self._maker_target_price = self._taker_result_price * (1 + self.config.target_profitability + self._tx_cost_pct)
         else:
+            # 若taker是卖方，那么maker是买方，应当少花出(target_profitability + _tx_cost_pct)
             self._maker_target_price = self._taker_result_price * (1 - self.config.target_profitability - self._tx_cost_pct)
 
     async def update_tx_costs(self):
@@ -176,6 +187,7 @@ class XEMMExecutor(ExecutorBase):
     async def get_tx_cost_in_asset(self, exchange: str, trading_pair: str, is_buy: bool, order_amount: Decimal,
                                    asset: str, order_type: OrderType = OrderType.MARKET):
         connector = self.connectors[exchange]
+        # 对AMM connector算gas费
         if self.is_amm_connector(exchange=exchange):
             gas_cost = connector.network_transaction_fee
             conversion_price = RateOracle.get_instance().get_pair_rate(f"{asset}-{gas_cost.token}")
@@ -183,6 +195,7 @@ class XEMMExecutor(ExecutorBase):
                 self.logger().warning(f"Could not get conversion rate for {asset}-{gas_cost.token}")
                 return Decimal("0")
             return gas_cost.amount / conversion_price
+        # 对非AMM connector算交易费
         else:
             fee = connector.get_fee(
                 base_currency=asset,
@@ -190,6 +203,7 @@ class XEMMExecutor(ExecutorBase):
                 order_type=order_type,
                 order_side=TradeType.BUY if is_buy else TradeType.SELL,
                 amount=order_amount,
+                # 注：算交易费用时都用_taker_result_price来算
                 price=self._taker_result_price,
                 is_maker=order_type.is_limit_type(),
             )
@@ -223,6 +237,7 @@ class XEMMExecutor(ExecutorBase):
 
     async def control_update_maker_order(self):
         await self.update_current_trade_profitability()
+        # 在maker订单成交前，检查到收益率极低或极高都取消maker订单
         if self._current_trade_profitability - self._tx_cost_pct < self.config.min_profitability:
             self.logger().info(f"Trade profitability {self._current_trade_profitability - self._tx_cost_pct} is below minimum profitability. Cancelling order.")
             self._strategy.cancel(self.maker_connector, self.maker_trading_pair, self.maker_order.order_id)
@@ -270,6 +285,7 @@ class XEMMExecutor(ExecutorBase):
                                       event: Union[BuyOrderCompletedEvent, SellOrderCompletedEvent]):
         if self.maker_order and event.order_id == self.maker_order.order_id:
             self.logger().info(f"Maker order {event.order_id} completed. Executing taker order.")
+            # 注：maker订单成交时，再下taker订单，同时开始关闭executor
             self.place_taker_order()
             self._status = RunnableStatus.SHUTTING_DOWN
 
@@ -330,6 +346,7 @@ class XEMMExecutor(ExecutorBase):
         if self.is_closed and self.maker_order and self.taker_order and self.maker_order.is_done and self.taker_order.is_done:
             maker_pnl = self.maker_order.executed_amount_base * self.maker_order.average_executed_price
             taker_pnl = self.taker_order.executed_amount_base * self.taker_order.average_executed_price
+            # 若config.maker_side == TradeType.SELL那么为负？
             return taker_pnl - maker_pnl - self.get_cum_fees_quote()
         else:
             return Decimal("0")

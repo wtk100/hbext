@@ -1,3 +1,9 @@
+###############################################################################################################
+### funding rate套利简单示例，没用controller，Takeaways:
+### 1. 如何获取funding rate数据
+### 2. 如何通过简单遍历找到一个币种的费率差最大的一对交易所
+### 3. 如何计算损益及开平仓逻辑及实现
+###############################################################################################################
 import os
 from decimal import Decimal
 from typing import Dict, List, Set
@@ -21,6 +27,7 @@ class FundingRateArbitrageConfig(StrategyV2ConfigBase):
     candles_config: List[CandlesConfig] = []
     controllers_config: List[str] = []
     markets: Dict[str, Set[str]] = {}
+    # 以下为新增配置项
     leverage: int = Field(
         default=20, gt=0,
         json_schema_extra={"prompt": lambda mi: "Enter the leverage (e.g. 20): ", "prompt_on_new": True},
@@ -48,18 +55,21 @@ class FundingRateArbitrageConfig(StrategyV2ConfigBase):
             "prompt_on_new": True
         }
     )
+    # 止盈平仓
     profitability_to_take_profit: Decimal = Field(
         default=0.01,
         json_schema_extra={
             "prompt": lambda mi: "Enter the profitability to take profit (including PNL of positions and fundings received): ",
             "prompt_on_new": True}
     )
+    # 止损平仓，由funding rate差判断
     funding_rate_diff_stop_loss: Decimal = Field(
         default=-0.001,
         json_schema_extra={
             "prompt": lambda mi: "Enter the funding rate difference to stop the position (e.g. -0.001): ",
             "prompt_on_new": True}
     )
+    # 是否检查下单时由于交易所间标的差价和手续费造成的瞬时损益来决定是否进入套利
     trade_profitability_condition_to_enter: bool = Field(
         default=False,
         json_schema_extra={
@@ -76,20 +86,25 @@ class FundingRateArbitrageConfig(StrategyV2ConfigBase):
 
 
 class FundingRateArbitrage(StrategyV2Base):
+    # 交易对应的quote asset
     quote_markets_map = {
         "hyperliquid_perpetual": "USD",
         "binance_perpetual": "USDT"
     }
+    # 交易对应的资金费率支付周期
     funding_payment_interval_map = {
         "binance_perpetual": 60 * 60 * 8,
         "hyperliquid_perpetual": 60 * 60 * 1
     }
+    # 用于估算套利盈利率的持仓时长，24小时，用于乘以费率差后与min_funding_rate_profitability比较
     funding_profitability_interval = 60 * 60 * 24
 
+    # 把token和交易所对应quote asset组合成trading pair
     @classmethod
     def get_trading_pair_for_connector(cls, token, connector):
         return f"{token}-{cls.quote_markets_map.get(connector, 'USDT')}"
 
+    # 从配置初始化基类ScriptStrategyBase的类变量markets，含交易所及其对应的币对，由外部(StartCommand)调用
     @classmethod
     def init_markets(cls, config: FundingRateArbitrageConfig):
         markets = {}
@@ -107,12 +122,14 @@ class FundingRateArbitrage(StrategyV2Base):
     def start(self, clock: Clock, timestamp: float) -> None:
         """
         Start the strategy.
+        由StartCommand绑定Clock后, 启动Clock调用
         :param clock: Clock to use.
         :param timestamp: Current time.
         """
         self._last_timestamp = timestamp
         self.apply_initial_setting()
 
+    # 初始化设置position mode和leverage
     def apply_initial_setting(self):
         for connector_name, connector in self.connectors.items():
             if self.is_perpetual(connector_name):
@@ -121,6 +138,7 @@ class FundingRateArbitrage(StrategyV2Base):
                 for trading_pair in self.market_data_provider.get_trading_pairs(connector_name):
                     connector.set_leverage(trading_pair, self.config.leverage)
 
+    # 获取一个token在所有交易所的funding rate
     def get_funding_info_by_token(self, token):
         """
         This method provides the funding rates across all the connectors
@@ -131,6 +149,7 @@ class FundingRateArbitrage(StrategyV2Base):
             funding_rates[connector_name] = connector.get_funding_info(trading_pair)
         return funding_rates
 
+    # 计算开仓瞬时产生的费后损益率
     def get_current_profitability_after_fees(self, token: str, connector_1: str, connector_2: str, side: TradeType):
         """
         This methods compares the profitability of buying at market in the two exchanges. If the side is TradeType.BUY
@@ -139,18 +158,21 @@ class FundingRateArbitrage(StrategyV2Base):
         trading_pair_1 = self.get_trading_pair_for_connector(token, connector_1)
         trading_pair_2 = self.get_trading_pair_for_connector(token, connector_2)
 
+        # 获取在交易所1的市场价， 做买方/卖方由side决定，side为BUY做买方支付资金费率，否则做卖方收取资金费率
         connector_1_price = Decimal(self.market_data_provider.get_price_for_quote_volume(
             connector_name=connector_1,
             trading_pair=trading_pair_1,
             quote_volume=self.config.position_size_quote,
             is_buy=side == TradeType.BUY,
         ).result_price)
+        # 获取在交易所2的市场价， 做卖方/买方由side决定，side为BUY做卖方收取资金费率，否则做买方支付资金费率
         connector_2_price = Decimal(self.market_data_provider.get_price_for_quote_volume(
             connector_name=connector_2,
             trading_pair=trading_pair_2,
             quote_volume=self.config.position_size_quote,
             is_buy=side != TradeType.BUY,
         ).result_price)
+        # 获取在交易所1的开仓手续费率(OrderType相同，则开多头和开空头仓位的手续费率相同)
         estimated_fees_connector_1 = self.connectors[connector_1].get_fee(
             base_currency=trading_pair_1.split("-")[0],
             quote_currency=trading_pair_1.split("-")[1],
@@ -161,6 +183,7 @@ class FundingRateArbitrage(StrategyV2Base):
             is_maker=False,
             position_action=PositionAction.OPEN
         ).percent
+        # 获取在交易所2的开仓手续费率(OrderType相同，则开多头和开空头仓位的手续费率相同)
         estimated_fees_connector_2 = self.connectors[connector_2].get_fee(
             base_currency=trading_pair_2.split("-")[0],
             quote_currency=trading_pair_2.split("-")[1],
@@ -172,12 +195,14 @@ class FundingRateArbitrage(StrategyV2Base):
             position_action=PositionAction.OPEN
         ).percent
 
+        # 计算开仓瞬时产生的损益
         if side == TradeType.BUY:
             estimated_trade_pnl_pct = (connector_2_price - connector_1_price) / connector_1_price
         else:
             estimated_trade_pnl_pct = (connector_1_price - connector_2_price) / connector_2_price
         return estimated_trade_pnl_pct - estimated_fees_connector_1 - estimated_fees_connector_2
 
+    # 针对一个标的，遍历所有交易所间的两两全排列，找出资金费率差最大的两个交易所
     def get_most_profitable_combination(self, funding_info_report: Dict):
         best_combination = None
         highest_profitability = 0
@@ -193,6 +218,7 @@ class FundingRateArbitrage(StrategyV2Base):
                         best_combination = (connector_1, connector_2, trade_side, funding_rate_diff)
         return best_combination
 
+    # 将资金费率折算到1秒，以公平比较不同时间长度的资金费率支付周期下的资金费率
     def get_normalized_funding_rate_in_seconds(self, funding_info_report, connector_name):
         return funding_info_report[connector_name].rate / self.funding_payment_interval_map.get(connector_name, 60 * 60 * 8)
 
@@ -204,6 +230,11 @@ class FundingRateArbitrage(StrategyV2Base):
         positive pnl between funding rate. Is logged and computed the trading profitability at the time for entering
         at market to open the possibilities for other people to create variations like sending limit position executors
         and if one gets filled buy market the other one to improve the entry prices.
+        处理开仓逻辑, 创建CreateExecutorActions. 这里为简化版逻辑:
+        1. 一个标的只开一对仓位, 优点: 市场剧烈波动风险被分散到多币种, 缺点: 失去部分机会
+        2. PositionExecutor无拆单功能
+        3. 开仓规模无动态规划
+        4. 未考虑结合XEMM、Arbitrage
         """
         create_actions = []
         for token in self.config.tokens:
@@ -211,10 +242,13 @@ class FundingRateArbitrage(StrategyV2Base):
                 funding_info_report = self.get_funding_info_by_token(token)
                 best_combination = self.get_most_profitable_combination(funding_info_report)
                 connector_1, connector_2, trade_side, expected_profitability = best_combination
+                # 注：在获取最佳组合时，expected_profitability=funding_rate_diff*funding_profitability_interval
                 if expected_profitability >= self.config.min_funding_rate_profitability:
+                    # 交易瞬时产生的由交易所间价差和手续费导致的的损益
                     current_profitability = self.get_current_profitability_after_fees(
                         token, connector_1, connector_2, trade_side
                     )
+                    # 若要检查交易瞬时损益，则当其为负时就跳过
                     if self.config.trade_profitability_condition_to_enter:
                         if current_profitability < 0:
                             self.logger().info(f"Best Combination: {connector_1} | {connector_2} | {trade_side}"
@@ -226,6 +260,7 @@ class FundingRateArbitrage(StrategyV2Base):
                                        f"Funding rate profitability: {expected_profitability}"
                                        f"Trading profitability after fees: {current_profitability}"
                                        f"Starting executors...")
+                    # 注：这里采用PositionExecutor无拆单功能
                     position_executor_config_1, position_executor_config_2 = self.get_position_executors_config(token, connector_1, connector_2, trade_side)
                     self.active_funding_arbitrages[token] = {
                         "connector_1": connector_1,
@@ -246,19 +281,25 @@ class FundingRateArbitrage(StrategyV2Base):
         """
         stop_executor_actions = []
         for token, funding_arbitrage_info in self.active_funding_arbitrages.items():
+            # 获取当前套利交易的Executors
             executors = self.filter_executors(
                 executors=self.get_all_executors(),
                 filter_func=lambda x: x.id in funding_arbitrage_info["executors_ids"]
             )
+            # 获取已兑现的资金费总和
             funding_payments_pnl = sum(funding_payment.amount for funding_payment in funding_arbitrage_info["funding_payments"])
+            # 获取Executors的净损益，即两边仓位的损益和
             executors_pnl = sum(executor.net_pnl_quote for executor in executors)
+            # 判断当前收益率是否满足止盈条件
             take_profit_condition = executors_pnl + funding_payments_pnl > self.config.profitability_to_take_profit * self.config.position_size_quote
             funding_info_report = self.get_funding_info_by_token(token)
             if funding_arbitrage_info["side"] == TradeType.BUY:
                 funding_rate_diff = self.get_normalized_funding_rate_in_seconds(funding_info_report, funding_arbitrage_info["connector_2"]) - self.get_normalized_funding_rate_in_seconds(funding_info_report, funding_arbitrage_info["connector_1"])
             else:
                 funding_rate_diff = self.get_normalized_funding_rate_in_seconds(funding_info_report, funding_arbitrage_info["connector_1"]) - self.get_normalized_funding_rate_in_seconds(funding_info_report, funding_arbitrage_info["connector_2"])
+            # 判断当前费率差是否满足止损条件
             current_funding_condition = funding_rate_diff * self.funding_profitability_interval < self.config.funding_rate_diff_stop_loss
+            # 满足止盈或止损条件即平仓
             if take_profit_condition:
                 self.logger().info("Take profit profitability reached, stopping executors")
                 self.stopped_funding_arbitrages[token].append(funding_arbitrage_info)

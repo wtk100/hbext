@@ -1,3 +1,6 @@
+########################################################################################################################
+### 单纯的订单Executor，只管下单，不管后续跟踪处理、统计损益、费用等，支持MARKET/LIMIT/LIMIT_MAKER/LIMIT_CHASER四种下单方式
+########################################################################################################################
 import asyncio
 import logging
 from decimal import Decimal
@@ -96,9 +99,11 @@ class OrderExecutor(ExecutorBase):
         threshold = self.config.chaser_config.refresh_threshold
 
         if self.config.side == TradeType.BUY:
+            # 如果价格上涨导致下单价与市场价的距离拉大并超过市场价的一定比例threshold，则重新按配置distance下单
             if current_price - self._order.order.price > (current_price * threshold):
                 self.renew_order()
         else:  # SELL
+            # 如果价格下跌导致下单价与市场价的距离拉大并超过市场价的一定比例threshold，则重新按配置distance下单
             if self._order.order.price - current_price > (current_price * threshold):
                 self.renew_order()
 
@@ -167,6 +172,10 @@ class OrderExecutor(ExecutorBase):
     def get_order_price(self) -> Decimal:
         """
         Get the order price based on the execution strategy.
+        # LIMIT - 配置的价格
+        # LIMIT MAKER - 配置的价格与市场价(买一/卖一, 非中间价)的更优者
+        # MARKET - 无
+        # LIMIT CHASER - 按LimitChaserConfig动态控制
 
         :return: The order price.
         """

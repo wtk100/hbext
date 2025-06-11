@@ -39,9 +39,11 @@ class MarketTradingPairTuple(NamedTuple):
     def get_price_by_type(self, price_type: PriceType) -> Decimal:
         return self.market.get_price_by_type(self.trading_pair, price_type)
 
+    # 从OrderBook中找出满足交易数量的加权平均价格(方法来自OrderBook对象)
     def get_vwap_for_volume(self, is_buy: bool, volume: Decimal) -> ClientOrderBookQueryResult:
         return self.market.get_vwap_for_volume(self.trading_pair, is_buy, volume)
 
+    # 从OrderBook中找出满足交易数量的最后一个价格(方法来自OrderBook对象)
     def get_price_for_volume(self, is_buy: bool, volume: Decimal) -> ClientOrderBookQueryResult:
         return self.market.get_price_for_volume(self.trading_pair, is_buy, volume)
 
