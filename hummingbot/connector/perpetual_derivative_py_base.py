@@ -1,3 +1,15 @@
+########################################################################################################################
+# 此类主要定义所有永续合约交易所对象要实现的方法，包括实方法和虚方法，在基类ExchangePyBase基础上新增：
+# 1. 组合PerpetualTrading对象并桥接其功能，其定义管理合约仓位(涉及多空方向、杠杆)、杠杆设置、资金费率信息.
+# 2. 监听资金费率信息相关定义(包括start_network增加资金费率信息监听).
+# 3. 持续获取资金费支付信息的相关定义(包括start_network增加开启资金费支付信息polling、tick增加驱动资金费率polling的事件的定义).
+# 4. 交易所ready状态检查增加资金费率是否初始化.
+# 注:此类开始定义了self._trading_pairs，用于：
+#    1. 初始化PerpetualTrading，在其中用于检查是否所有币对都在其self._funding_info里存在即是否所有币对都已初始化funding info. 
+#    2. _execute_set_position_mode, 用于设置币对的position mode, 当self._trading_pairs为空时需测试，变动时需要处理新币对.
+#    3. _init_funding_info, 用于API初始化币对funding info, 当self._trading_pairs为空时需测试，变动时需要处理新币对.
+#    4. _update_all_funding_payments, 用于API更新币对funding payment，当self._trading_pairs为空或变动时无需额外处理.
+########################################################################################################################
 import asyncio
 from abc import ABC, abstractmethod
 from decimal import Decimal
@@ -81,7 +93,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
     def get_sell_collateral_token(self, trading_pair: str) -> str:
         raise NotImplementedError
 
-    # 由Clock调用
+    # 由Clock调用，相比父类增加funding fee payment polling的执行驱动(仍用事件驱动)
     def tick(self, timestamp: float):
         """
         Includes the logic that has to be processed every time a new tick happens in the bot. Particularly it enables
@@ -89,11 +101,13 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
         """
         last_tick = int(self._last_timestamp / self.funding_fee_poll_interval)
         current_tick = int(timestamp / self.funding_fee_poll_interval)
+        # _status_polling_loop_fetch_updates用父类的interval逻辑(通过_status_polling_loop)
         super().tick(timestamp)
+        # 每隔funding_fee_poll_interval的时间才poll一次funding fee payment信息
         if current_tick > last_tick:
             self._funding_fee_poll_notifier.set()
 
-    # 由Clock调用
+    # 由Clock调用，相比父类增加funding fee payment polling和监听funding rate info的执行启动
     async def start_network(self):
         await super().start_network()
         self._perpetual_trading.start()
@@ -201,6 +215,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
         """
         Returns a tuple of the latest funding payment timestamp, funding rate, and payment amount.
         If no payment exists, return (0, -1, -1)
+        交易所类用Rest API请求.
         """
         raise NotImplementedError
 
@@ -297,6 +312,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
     ) -> TradeFeeBase:
         raise NotImplementedError
 
+    # 由tick通过event驱动; 相比父类，增加position更新
     async def _status_polling_loop_fetch_updates(self):
         await safe_gather(
             self._update_positions(),
@@ -310,6 +326,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
         )
 
         if not success:
+            # 若有一个币对设置失败的话，就把设置成功的币对改回默认mode
             await self._execute_set_position_mode_for_pairs(
                 mode=self._perpetual_trading.position_mode, trading_pairs=successful_pairs
             )
@@ -324,6 +341,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
                     ),
                 )
         else:
+            # 设置成功的话就把_perpetual_trading对象里的position mode也更新
             self._perpetual_trading.set_position_mode(mode)
             for trading_pair in self.trading_pairs:
                 self.trigger_event(
@@ -357,11 +375,14 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
     async def _execute_set_leverage(self, trading_pair: str, leverage: int):
         success, msg = await self._set_trading_pair_leverage(trading_pair, leverage)
         if success:
+            # 设置成功的话就把_perpetual_trading对象里的leverage也更新
             self._perpetual_trading.set_leverage(trading_pair, leverage)
             self.logger().info(f"Leverage for {trading_pair} successfully set to {leverage}.")
         else:
             self.logger().network(f"Error setting leverage {leverage} for {trading_pair}: {msg}")
 
+    # 注意_perpetual_trading.funding_info_stream被更新的机制，由各交易所的OrderBookDataSource的listen_for_funding_info方法
+    # (由类PerpetualAPIOrderBookDataSource定义)放进stream
     async def _listen_for_funding_info(self):
         await self._init_funding_info()
         await self._orderbook_ds.listen_for_funding_info(
@@ -370,6 +391,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
 
     async def _init_funding_info(self):
         for trading_pair in self.trading_pairs:
+            # _orderbook_ds基本是Rest API请求获取
             funding_info = await self._orderbook_ds.get_funding_info(trading_pair)
             self._perpetual_trading.initialize_funding_info(funding_info)
 
@@ -377,6 +399,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
         """
         Periodically calls _update_funding_payment(), responsible for handling all funding payments.
         """
+        # false不触发MarketEvent.FundingPaymentCompleted事件，仅用于初始化self._last_funding_fee_payment_ts
         await self._update_all_funding_payments(fire_event_on_new=False)  # initialization of the timestamps
         while True:
             await self._funding_fee_poll_notifier.wait()

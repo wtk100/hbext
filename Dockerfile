@@ -1,7 +1,21 @@
+
+################################################################################################
+# RUN命令:          运行docker build时需要执行的shell命令
+# CMD命令:          指定容器创建时的默认命令（可以被docker run覆盖）
+# ENTRYPOINT命令:   指定容器创建时的主要命令（不可被docker run覆盖）
+# COPY命令:         从本地复制文件到镜像中
+# WORKDIR命令:      指定镜像中的默认路径
+# SHELL命令：       覆盖Docker中默认的shell，用于RUN、CMD和ENTRYPOINT指令
+# ARG命令：         定义在构建image过程中传递给构建器的变量，可使用 "docker build" 命令设置
+# LABEL命令：       添加镜像的元数据，使用键值对的形式
+# ENV命令：         在容器内部设置环境变量
+################################################################################################
+
 # Set the base image
 FROM continuumio/miniconda3:latest AS builder
 
 # Install system dependencies
+# 安装C++编译器
 RUN apt-get update && \
     apt-get install -y sudo libusb-1.0 gcc g++ python3-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -9,12 +23,14 @@ RUN apt-get update && \
 WORKDIR /home/hummingbot
 
 # Create conda environment
+# 创建Conda虚拟环境并安装依赖包
 COPY setup/environment.yml /tmp/environment.yml
 RUN conda env create -f /tmp/environment.yml && \
     conda clean -afy && \
     rm /tmp/environment.yml
 
 # Copy remaining files
+# 注：只复制编译时必要的文件
 COPY bin/ bin/
 COPY hummingbot/ hummingbot/
 COPY scripts/ scripts/
@@ -65,6 +81,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Create mount points
+# 注：这些都是可变文件，conf/log/data/certs由程序生成，scripts/controllers可人为更新; 
+# 镜像运行时由volume命令挂载对应本地目录，因此本地目录的更新可被程序使用.
 RUN mkdir -p /home/hummingbot/conf /home/hummingbot/conf/connectors /home/hummingbot/conf/strategies /home/hummingbot/conf/controllers /home/hummingbot/conf/scripts /home/hummingbot/logs /home/hummingbot/data /home/hummingbot/certs /home/hummingbot/scripts /home/hummingbot/controllers
 
 WORKDIR /home/hummingbot

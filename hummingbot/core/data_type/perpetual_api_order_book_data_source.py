@@ -1,3 +1,9 @@
+#########################################################################################################################################
+# 此类是负责与交易所互动，维护永续合约Order Book信息的基类，包括三部分信息：最新交易信息、订单簿增量更新、订单簿快照. 
+# 相比基类OrderBookTrackerDataSource，新增：
+# 1. 从WS监听funding_info消息.
+# 2. 获取和存储funding_info的消息队列.
+#########################################################################################################################################
 import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
@@ -15,6 +21,7 @@ class PerpetualAPIOrderBookDataSource(OrderBookTrackerDataSource, ABC):
     async def get_funding_info(self, trading_pair: str) -> FundingInfo:
         """
         Return the funding information for a single trading pair.
+        基本是Rest API请求获取.
         """
         raise NotImplementedError
 

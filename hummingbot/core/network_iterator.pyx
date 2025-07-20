@@ -1,3 +1,10 @@
+####################################################################################################################################
+# 此类主要实现：
+# 1. 定义start_network和stop_network, 即开始和结束网络活动
+# 2. 网络连接状态监控
+# 注：父类TimeIterator的tick方法这里并未新增任何定义.
+####################################################################################################################################
+
 # distutils: language=c++
 
 import asyncio
@@ -86,7 +93,7 @@ cdef class NetworkIterator(TimeIterator):
     async def stop_network(self):
         pass
 
-    # 子类需定义
+    # 子类需定义，PING交易所
     async def check_network(self) -> NetworkStatus:
         self.logger().warning("check_network() has not been implemented!")
         return NetworkStatus.NOT_CONNECTED
@@ -133,9 +140,10 @@ cdef class NetworkIterator(TimeIterator):
         self._network_status = NetworkStatus.STOPPED
         safe_ensure_future(self.stop_network())
 
-    # 注：父类TimeIterator的c_tick方法未重载
+    # 重载父类start方法. 注：父类TimeIterator的c_tick方法未重载
     def start(self, clock: Clock, timestamp: float):
         self.c_start(clock, timestamp)
 
+    # 重载父类stop方法. 
     def stop(self, clock: Clock):
         self.c_stop(clock)

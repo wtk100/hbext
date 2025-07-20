@@ -1,3 +1,10 @@
+####################################################################################################################################
+# 此cython类主要定义所有交易所对象要实现的方法，包括实方法和虚方法，在基类ConnectorBase基础上新增：
+# 1. Order Book及其tracker相关定义，包括从中获取各种量价信息
+# 2. 本地币对与交易所币对的mapping关系
+# 3. 定义获取最新成交价、交易手续费等虚方法
+# 注：尚未定义任何与self._trading_pairs绑定的交易所交互.
+####################################################################################################################################
 import asyncio
 from decimal import Decimal
 from typing import Dict, List, Iterator, Mapping, Optional, TYPE_CHECKING
@@ -44,10 +51,12 @@ cdef class ExchangeBase(ConnectorBase):
     def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
         return hb_trading_pair
 
+    # 子类ExchangePyBase有实现
     @property
     def order_books(self) -> Dict[str, OrderBook]:
         raise NotImplementedError
 
+    # 子类ExchangePyBase有实现
     @property
     def limit_orders(self) -> List[LimitOrder]:
         raise NotImplementedError
@@ -123,17 +132,21 @@ cdef class ExchangeBase(ConnectorBase):
     def get_mid_price(self, trading_pair: str) -> Decimal:
         return (self.get_price(trading_pair, True) + self.get_price(trading_pair, False)) / Decimal("2")
 
+    # 父类已有相同定义，重复
     cdef str c_buy(self, str trading_pair, object amount, object order_type=OrderType.MARKET,
                    object price=s_decimal_NaN, dict kwargs={}):
         return self.buy(trading_pair, amount, order_type, price, **kwargs)
 
+    # 父类已有相同定义，重复
     cdef str c_sell(self, str trading_pair, object amount, object order_type=OrderType.MARKET,
                     object price=s_decimal_NaN, dict kwargs={}):
         return self.sell(trading_pair, amount, order_type, price, **kwargs)
 
+    # 父类已有相同定义，重复
     cdef c_cancel(self, str trading_pair, str client_order_id):
         return self.cancel(trading_pair, client_order_id)
 
+    # 无子类实现
     cdef c_stop_tracking_order(self, str order_id):
         raise NotImplementedError
 
@@ -274,20 +287,25 @@ cdef class ExchangeBase(ConnectorBase):
     def get_price(self, trading_pair: str, is_buy: bool) -> Decimal:
         return self.c_get_price(trading_pair, is_buy)
 
+    # 子类ExchangePyBase有实现
     def buy(self, trading_pair: str, amount: Decimal, order_type=OrderType.MARKET,
             price: Decimal = s_decimal_NaN, **kwargs) -> str:
         raise NotImplementedError
 
+    # 子类ExchangePyBase有实现
     def sell(self, trading_pair: str, amount: Decimal, order_type=OrderType.MARKET,
              price: Decimal = s_decimal_NaN, **kwargs) -> str:
         raise NotImplementedError
 
+    # 子类ExchangePyBase有实现
     def cancel(self, trading_pair: str, client_order_id: str):
         raise NotImplementedError
 
+    # 子类ExchangePyBase有实现
     def get_order_book(self, trading_pair: str) -> OrderBook:
         raise NotImplementedError
 
+    # 直到具体交易所类才实现
     def get_fee(self,
                 base_currency: str,
                 quote_currency: str,
@@ -364,6 +382,7 @@ cdef class ExchangeBase(ConnectorBase):
         """
         return Decimal(str(self.get_price_for_volume(trading_pair, is_buy, amount).result_price))
 
+    # 子类ExchangePyBase有实现
     async def _initialize_trading_pair_symbol_map(self):
         raise NotImplementedError
 
@@ -379,5 +398,6 @@ cdef class ExchangeBase(ConnectorBase):
         """
         self._order_book_tracker = order_book_tracker
 
+    # 直到具体交易所类才实现
     async def _get_last_traded_price(self, trading_pair: str) -> float:
         raise NotImplementedError

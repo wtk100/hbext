@@ -1,3 +1,16 @@
+################################################################################################################################
+# 此类主要定义所有交易所对象要实现的方法，包括实方法和虚方法，在基cython类ExchangeBase基础上新增：
+# 1. User Stream tracker/Order Book Tracker/Order Tracker, status polling/trading rule polling/trade fee polling及authenticator, 
+#    throttler, time synchronizer等定义.
+# 2. 检查交易所是否ready for strategy to run.
+# 3. 实现tick方法，内含用event驱动status update polling执行.
+# 4. 实现start_network/stop_network方法，内含启停以下更新的跟踪：order book/trading rules/trading fees/status(含服务器时间、账户余额、
+#    订单状态)/user stream/lost orders update (除status update polling依赖event驱动外其他都是直接循环, order book tracking).
+# 5. 实现各种订单操作包括buy/sell/cancel/getfee并跟踪订单(并定义虚方法_place_cancel/_place_order/_get_fee，由具体交易所类实现).
+# 注:尚未定义self._trading_pairs, 但定义了虚属性trading_pairs，仅用于OrderBookTrackerDataSource、OrderBookTracker初始化. 因此
+#    需要确保当self._trading_pairs为空或变动时，OrderBookTrackerDataSource及其子类、OrderBookTracker利用self._trading_pairs与
+#    交易所的交互具有对应的处理.
+################################################################################################################################
 import asyncio
 import copy
 import logging
@@ -89,6 +102,7 @@ class ExchangePyBase(ExchangeBase, ABC):
             cls._logger = logging.getLogger(HummingbotLogger.logger_name_for_class(cls))
         return cls._logger
 
+    # 以下未实现的property直到具体交易所类才实现
     @property
     @abstractmethod
     def name(self) -> str:
@@ -165,6 +179,7 @@ class ExchangePyBase(ExchangeBase, ABC):
     def limit_orders(self) -> List[LimitOrder]:
         return [in_flight_order.to_limit_order() for in_flight_order in self.in_flight_orders.values()]
 
+    # 开始策略之前要检查的5种状态是否ready
     @property
     def status_dict(self) -> Dict[str, bool]:
         return {
@@ -658,7 +673,7 @@ class ExchangePyBase(ExchangeBase, ABC):
     #
     web_utils = None
 
-    # 在父类NetworkIterator的c_start中定义了由Clock调用
+    # 在父类NetworkIterator的c_start中定义了由Clock开始时调用
     async def start_network(self):
         """
         Start all required tasks to update the status of the connector. Those tasks include:
@@ -932,6 +947,7 @@ class ExchangePyBase(ExchangeBase, ABC):
     async def _status_polling_loop_fetch_updates(self):
         """
         Called by _status_polling_loop, which executes after each tick() is executed
+        由tick通过event驱动, 注: PerpetualDerivativePyBase和具体交易所类都有重载实现如binance
         """
         await safe_gather(
             self._update_all_balances(),
@@ -975,6 +991,7 @@ class ExchangePyBase(ExchangeBase, ABC):
                 f"Tracked order {order.client_order_id} does not have an exchange id. "
                 f"Attempting fetch in next polling interval."
             )
+            # Order tracker：从cached orders放到lost orders里
             await self._order_tracker.process_order_not_found(order.client_order_id)
         except asyncio.CancelledError:
             raise
@@ -1090,6 +1107,11 @@ class ExchangePyBase(ExchangeBase, ABC):
         exchange_info = await self._api_get(path_url=self.trading_pairs_request_path)
         return exchange_info
 
+    # 交易所状态检查(status polling)的时间间隔：如果上次从user stream收到消息已超过TICK_INTERVAL_LIMIT(60s),
+    # 则为SHORT_POLL_INTERVAL(5s), 否则为LONG_POLL_INTERVAL(120s).
+    # 注:从User Stream获得的更新一般有trade/order status/balance/position的更新(个别如binance还有margin call)，而status polling
+    #    也是这四种(见_status_polling_loop_fetch_updates方法的各交易所实现)；所以当user stream在正常更新的话status polling可以低
+    #    频，否则就得高频.
     def _get_poll_interval(self, timestamp: float) -> float:
         last_user_stream_message_time = (
             0 if self._user_stream_tracker is None else self._user_stream_tracker.last_recv_time

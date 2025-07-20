@@ -28,6 +28,7 @@ class WSAssistant:
         self._ws_post_processors = ws_post_processors or []
         self._auth = auth
 
+    # 每次接收新消息后WSConnection对象会自动更新last_recv_time
     @property
     def last_recv_time(self) -> float:
         return self._connection.last_recv_time

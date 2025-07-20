@@ -1,3 +1,9 @@
+#########################################################################################################################################
+# 注：与self._trading_pairs相关交易所互动有：
+#   _subscribe_channels: 用于订阅WS Channels，self._trading_pairs若为空需测试是否报错；若变动需处理subscribe/unsubscribe.
+#   listen_for_order_book_snapshots: 用于API请求获取orde book snapshot; self._trading_pairs若为空若变动均无影响.
+#   _parse_funding_info_message: 用于判断funding info的WS消息是否需要处理; self._trading_pairs若为空若变动均无影响.
+#########################################################################################################################################
 import asyncio
 import time
 from collections import defaultdict
@@ -37,19 +43,27 @@ class BinancePerpetualAPIOrderBookDataSource(PerpetualAPIOrderBookDataSource):
         self._connector = connector
         self._api_factory = api_factory
         self._domain = domain
+        # 与基类OrderBookTrackerDataSource重复
         self._trading_pairs: List[str] = trading_pairs
+        # 与基类OrderBookTrackerDataSource重复
         self._message_queue: Dict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
+        # 重写基类OrderBookTrackerDataSource的hard code定义
         self._trade_messages_queue_key = CONSTANTS.TRADE_STREAM_ID
+        # 重写基类OrderBookTrackerDataSource的hard code定义
         self._diff_messages_queue_key = CONSTANTS.DIFF_STREAM_ID
+        # 重写基类PerpetualAPIOrderBookDataSource的hard code定义
         self._funding_info_messages_queue_key = CONSTANTS.FUNDING_INFO_STREAM_ID
+        # 与基类OrderBookTrackerDataSource重复
         self._snapshot_messages_queue_key = "order_book_snapshot"
 
     async def get_last_traded_prices(self,
                                      trading_pairs: List[str],
                                      domain: Optional[str] = None) -> Dict[str, float]:
+        # get_last_traded_prices由ExchangeBase定义
         return await self._connector.get_last_traded_prices(trading_pairs=trading_pairs)
 
     async def get_funding_info(self, trading_pair: str) -> FundingInfo:
+        # _request_complete_funding_info调rest api
         symbol_info: Dict[str, Any] = await self._request_complete_funding_info(trading_pair)
         funding_info = FundingInfo(
             trading_pair=trading_pair,
@@ -94,6 +108,8 @@ class BinancePerpetualAPIOrderBookDataSource(PerpetualAPIOrderBookDataSource):
     async def _subscribe_channels(self, ws: WSAssistant):
         """
         Subscribes to the trade events and diff orders events through the provided websocket connection.
+        订阅self._trading_pairs包含的币对的三个WS Channel: Order Book Diff, Trade, Funding Info.
+        注: 不同于某些交易所如okx, 这里并未订阅order book snapshot消息. Snapshot通过API获取, 见listen_for_order_book_snapshots.
         :param ws: the websocket assistant used to connect to the exchange
         """
         try:
@@ -121,6 +137,7 @@ class BinancePerpetualAPIOrderBookDataSource(PerpetualAPIOrderBookDataSource):
             self.logger().exception("Unexpected error occurred subscribing to order book trading and delta streams...")
             raise
 
+    # 判断WS消息来自哪个channel
     def _channel_originating_message(self, event_message: Dict[str, Any]) -> str:
         channel = ""
         if "result" not in event_message:
@@ -161,6 +178,7 @@ class BinancePerpetualAPIOrderBookDataSource(PerpetualAPIOrderBookDataSource):
 
         message_queue.put_nowait(trade_message)
 
+    # 注: 这里不同于父类优先用WS，而是直接遍历self._trading_pairs用Rest API请求；同时，Schedule是直接循环每小时整点进行.
     async def listen_for_order_book_snapshots(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
         while True:
             try:
@@ -168,6 +186,7 @@ class BinancePerpetualAPIOrderBookDataSource(PerpetualAPIOrderBookDataSource):
                     snapshot_msg: OrderBookMessage = await self._order_book_snapshot(trading_pair)
                     output.put_nowait(snapshot_msg)
                     self.logger().debug(f"Saved order book snapshot for {trading_pair}")
+                # 等到下一个整点再刷新order book snapshot
                 delta = CONSTANTS.ONE_HOUR - time.time() % CONSTANTS.ONE_HOUR
                 await self._sleep(delta)
             except asyncio.CancelledError:

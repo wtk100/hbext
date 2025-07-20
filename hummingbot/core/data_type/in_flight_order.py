@@ -36,6 +36,7 @@ class OrderState(Enum):
     COMPLETED = 10
 
 
+# 注：订单更新的主要信息只有：状态、俩ID
 class OrderUpdate(NamedTuple):
     trading_pair: str
     update_timestamp: float  # seconds
@@ -45,6 +46,7 @@ class OrderUpdate(NamedTuple):
     misc_updates: Optional[Dict[str, Any]] = None
 
 
+# 注：交易更新的主要信息有：成交(fill)的时间、价格、base量、quote量、手续费
 class TradeUpdate(NamedTuple):
     trade_id: str
     client_order_id: str
@@ -128,6 +130,7 @@ class InFlightOrder:
         if self.exchange_order_id:
             self.exchange_order_id_update_event.set()
         self.completely_filled_event = asyncio.Event()
+        # 订单被交易所处理事件(状态不再是初始的PENDING_CREATE)
         self.processed_by_exchange_event = asyncio.Event()
         self.check_processed_by_exchange_condition()
 
@@ -330,6 +333,7 @@ class InFlightOrder:
     def update_with_order_update(self, order_update: OrderUpdate) -> bool:
         """
         Updates the in flight order with an order update (from REST API or WS API)
+        主要更新exchange_order_id和状态
         return: True if the order gets updated otherwise False
         """
         if (order_update.client_order_id != self.client_order_id
@@ -354,6 +358,7 @@ class InFlightOrder:
     def update_with_trade_update(self, trade_update: TradeUpdate) -> bool:
         """
         Updates the in flight order with a trade update (from REST API or WS API)
+        主要更新已成交量, 包括base量和quote量
         :return: True if the order gets updated otherwise False
         """
         trade_id: str = trade_update.trade_id

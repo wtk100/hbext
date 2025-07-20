@@ -1,3 +1,7 @@
+#########################################################################################################################################
+# 注：与self._trading_pairs相关交易所互动有：
+#   _subscribe_channels: 用于订阅WS Channels，self._trading_pairs若为空需测试是否报错；若变动需处理subscribe/unsubscribe.
+#########################################################################################################################################
 import asyncio
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -220,6 +224,7 @@ class OkxPerpetualAPIOrderBookDataSource(PerpetualAPIOrderBookDataSource):
 
             order_book_args = [
                 {
+                    # 注：此Channel包含Order Book的Snapshot和Diff更新消息
                     "channel": CONSTANTS.WS_ORDER_BOOK_400_DEPTH_100_MS_EVENTS_CHANNEL,
                     "instId": ex_trading_pair
                 } for ex_trading_pair in ex_trading_pairs

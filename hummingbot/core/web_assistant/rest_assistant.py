@@ -90,6 +90,7 @@ class RESTAssistant:
             throttler_limit_id=throttler_limit_id
         )
 
+        # 确保提交API Request不超交易所API rate limit
         async with self._throttler.execute_task(limit_id=throttler_limit_id):
             response = await self.call(request=request, timeout=timeout)
 

@@ -1,3 +1,10 @@
+########################################################################################################################
+# 此类由PerpetualDerivativePyBase类组合并实现永续合约相关的交易所功能，增加永续合约交易需要管理的事务，主要有：
+# 仓位(涉及多空方向、杠杆)、杠杆设置、资金费率信息(仅从_funding_info_stream中获取，新funding info由交易所类放进stream)
+# 注:self._trading_pairs仅用于检查是否所有币对都在self._funding_info里存在即是否所有币对都已初始化funding info. 
+#    此检查在PerpetualDerivativePyBase中是status_dict的一项，用于检查交易所是否ready.
+#    当self._trading_pairs为空或变动时无需额外处理.
+########################################################################################################################
 import asyncio
 import copy
 import logging

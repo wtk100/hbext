@@ -1,3 +1,14 @@
+############################################################################################################################
+# 此类Binance永续合约交易所对象要实现的方法，在基类PerpetualDerivativePyBase基础上：
+# 1. 增加key/secret定义并实例化auth对象.
+# 2. 实现各种hard code定义如rate_limits/client_order_id命名规则/一些request path/trading pairs/资金费支付polling interval等.
+# 3. 实现一些事务性方法如请求的错误信息判断/创建web assistant factory, orde book ds, user stream ds/计算fee.
+# 4. tick驱动的_status_polling_loop_fetch_updates新增orde fill更新.
+# 5. 实现WS消息解析for: ORDER_TRADE_UPDATE/ACCOUNT_UPDATE/MARGIN_CALL.
+# 6. 实现API请求for: 下单/获取订单的交易记录/获取订单状态/获取最新成交价/更新余额/更新仓位/设置position mode/杠杆/获取资金费支付记录.
+# 7. 实现trading rule解析、初始化交易所trading pair symbol.
+# 注:self._trading_pairs仅用于_create_order_book_data_source(基类ExchangePyBase调用).
+############################################################################################################################
 import asyncio
 import time
 from collections import defaultdict
@@ -202,6 +213,7 @@ class BinancePerpetualDerivative(PerpetualDerivativePyBase):
         """
         pass
 
+    # 由tick通过event驱动(注: tick仅驱动此运行); 相比父类，增加trade(order fills)更新
     async def _status_polling_loop_fetch_updates(self):
         await safe_gather(
             self._update_order_fills_from_trades(),
@@ -622,6 +634,7 @@ class BinancePerpetualDerivative(PerpetualDerivativePyBase):
             else:
                 self._perpetual_trading.remove_position(pos_key)
 
+    # 针对active_orders对应的所有币对，用API获取trade fill记录并交由_order_tracker处理
     async def _update_order_fills_from_trades(self):
         last_tick = int(self._last_poll_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
         current_tick = int(self.current_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)

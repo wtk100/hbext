@@ -55,6 +55,7 @@ class BinancePerpetualUserStreamDataSource(UserStreamTrackerDataSource):
             self._ws_assistant = await self._api_factory.get_ws_assistant()
         return self._ws_assistant
 
+    # 获取WS listen key
     async def _get_listen_key(self):
         rest_assistant = await self._api_factory.get_rest_assistant()
         try:
@@ -71,6 +72,7 @@ class BinancePerpetualUserStreamDataSource(UserStreamTrackerDataSource):
 
         return data["listenKey"]
 
+    # 刷新WS listen key
     async def _ping_listen_key(self) -> bool:
         try:
             data = await self._connector._api_put(
@@ -132,6 +134,7 @@ class BinancePerpetualUserStreamDataSource(UserStreamTrackerDataSource):
         Subscribes to the trade events and diff orders events through the provided websocket connection.
 
         Binance does not require any channel subscription.
+        这里为何不像BinancePerpetualAPIOrderBookDataSource一样订阅channels???
 
         :param websocket_assistant: the websocket assistant used to connect to the exchange
         """

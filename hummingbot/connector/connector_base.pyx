@@ -1,3 +1,13 @@
+####################################################################################################################################
+# 此cython类主要定义所有交易所连接对象要实现的方法，包括实方法和虚方法：
+# 1. 定义需处理的MARKET_EVENTS，并用EventReporter和EventLogger监听市场事件
+# 2. 管理余额和可用余额(会用到：a.在途订单的占用；b.成交记录带来的余额变动；c.配置的单币种可用余额上限)
+# 3. 记录在途订单snapshot及其时间戳(如果_real_time_balance_update为False)、截止当前所有成交记录和交易所订单ID
+# 4. 记录此交易所的trade_fee_schema，计算交易手续费比例
+# 5. 定义时钟行为包括start, tick, stop，定义订单行为buy, sell, cancel, in_flight_orders，定义获取各种price及price/size/amount抹零
+# 注：尚未定义任何与self._trading_pairs绑定的交易所交互.
+####################################################################################################################################
+
 import asyncio
 import time
 from decimal import Decimal
@@ -143,7 +153,7 @@ cdef class ConnectorBase(NetworkIterator):
                 asset_balances[order.base_asset] += outstanding_amount
         return asset_balances
 
-    # 获得订单成交后的各资产余额变动量
+    # 获取从某时刻后，所有已成交订单(来自EventLogger记录的OrderFilled事件)带来的各资产余额变动量
     def order_filled_balances(self, starting_timestamp = 0) -> Dict[str, Decimal]:
         """
         Calculates total asset balance changes from filled orders since the timestamp
@@ -153,7 +163,7 @@ cdef class ConnectorBase(NetworkIterator):
         :param starting_timestamp: The starting timestamp to include filter order filled events
         :returns A dictionary of tokens and their balance
         """
-        # 获取已成交订单事件集合
+        # 从event_logs获取已成交订单事件集合，self.event_logs是self._event_logger即EventLogger对象，会监听MARKET_EVENTS中的事件
         order_filled_events = list(filter(lambda e: isinstance(e, OrderFilledEvent), self.event_logs))
         order_filled_events = [o for o in order_filled_events if o.timestamp > starting_timestamp]
         balances = {}
@@ -179,10 +189,12 @@ cdef class ConnectorBase(NetworkIterator):
     def get_exchange_limit_config(self, market: str) -> Dict[str, object]:
         """
         Retrieves the Balance Limits for the specified market.
+        从配置获取一个交易所的单币种余额上限
         """
         exchange_limits = self._client_config.balance_asset_limit.get(market, {})
         return exchange_limits if exchange_limits is not None else {}
 
+    # 交易所的5个初始化任务状态(由ExchangePyBase实现)，用于判断交易所是否ready for trading
     @property
     def status_dict(self) -> Dict[str, bool]:
         """
@@ -202,6 +214,7 @@ cdef class ConnectorBase(NetworkIterator):
     def event_logs(self) -> List[any]:
         return self._event_logger.event_log
 
+    # 交易所是否ready for交易，依据是检查几个初始化任务状态(由ExchangePyBase实现)
     @property
     def ready(self) -> bool:
         """
@@ -209,14 +222,17 @@ cdef class ConnectorBase(NetworkIterator):
         """
         raise NotImplementedError
 
+    # 在途订单(由ExchangePyBase实现，从OrderTracker中获取)
     @property
     def in_flight_orders(self) -> Dict[str, InFlightOrderBase]:
         raise NotImplementedError
 
+    # 订单跟踪状态(由ExchangePyBase实现，从OrderTracker中获取)
     @property
     def tracking_states(self) -> Dict[str, any]:
         return {}
 
+    # 恢复订单跟踪状态(由ExchangePyBase实现，从OrderTracker中获取)
     def restore_tracking_states(self, saved_states: Dict[str, any]):
         """
         Restores the tracking states from a previously saved state.
@@ -224,7 +240,7 @@ cdef class ConnectorBase(NetworkIterator):
         """
         pass
 
-    # 需要子类重载实现
+    # 需要子类重载实现，ExchangePyBase有实现
     def tick(self, timestamp: float):
         """
         Is called automatically by the clock for each clock's tick (1 second by default).
@@ -241,16 +257,17 @@ cdef class ConnectorBase(NetworkIterator):
     cdef c_start(self, Clock clock, double timestamp):
         self.start(clock=clock, timestamp=timestamp)
 
-    # 需要子类重载实现
+    # NetworkIterator.c_start调用start_network, 由ExchangePyBase实现
     def start(self, Clock clock, double timestamp):
         NetworkIterator.c_start(self, clock, timestamp)
         self._trade_volume_metric_collector.start()
 
-    # 由Clock调用，需要子类重载实现
+    # NetworkIterator.c_stop调用stop_network, 由ExchangePyBase实现
     cdef c_stop(self, Clock clock):
         NetworkIterator.c_stop(self, clock)
         self._trade_volume_metric_collector.stop()
 
+    # 需要子类重载实现，ExchangePyBase有实现
     async def cancel_all(self, timeout_seconds: float) -> List[CancellationResult]:
         """
         Cancels all in-flight orders and waits for cancellation results.
@@ -260,6 +277,7 @@ cdef class ConnectorBase(NetworkIterator):
         """
         raise NotImplementedError
 
+    # 需要子类重载实现，ExchangePyBase有实现
     def buy(self, trading_pair: str, amount: Decimal, order_type: OrderType, price: Decimal, **kwargs) -> str:
         """
         Buys an amount of base asset (of the given trading pair).
@@ -275,6 +293,7 @@ cdef class ConnectorBase(NetworkIterator):
                    object price=s_decimal_NaN, dict kwargs={}):
         return self.buy(trading_pair, amount, order_type, price, **kwargs)
 
+    # 需要子类重载实现，ExchangePyBase有实现
     def sell(self, trading_pair: str, amount: Decimal, order_type: OrderType, price: Decimal, **kwargs) -> str:
         """
         Sells an amount of base asset (of the given trading pair).
@@ -292,6 +311,7 @@ cdef class ConnectorBase(NetworkIterator):
         """
         Issues a batch order creation as a single API request for exchanges that implement this feature. The default
         implementation of this method is to send the requests discretely (one by one).
+        注: 此方法本为提供批量提交订单的交易所准备, 这里只默认提供一个一个创建订单的实现; 但子类几乎没有重载实现批量创建订单.
         :param orders_to_create: A list of LimitOrder or MarketOrder objects representing the orders to create. The
             order IDs can be blanc.
         :returns: A list of LimitOrder or MarketOrder objects representing the created orders, complete with the
@@ -351,6 +371,7 @@ cdef class ConnectorBase(NetworkIterator):
     cdef c_cancel(self, str trading_pair, str client_order_id):
         self.cancel(trading_pair, client_order_id)
 
+    # 需要子类重载实现，ExchangePyBase有实现
     def cancel(self, trading_pair: str, client_order_id: str):
         """
         Cancel an order.
@@ -363,17 +384,21 @@ cdef class ConnectorBase(NetworkIterator):
         """
         Issues a batch order cancelation as a single API request for exchanges that implement this feature. The default
         implementation of this method is to send the requests discretely (one by one).
+        注: 此方法本为提供批量取消订单的交易所准备, 这里只默认提供一个一个取消订单的实现; 但子类几乎没有重载实现批量创建订单. ExchangePyBase定义了新方法cancel_all
         :param orders_to_cancel: A list of the orders to cancel.
         """
         for order in orders_to_cancel:
             self.cancel(trading_pair=order.trading_pair, client_order_id=order.client_order_id)
 
+    # 无子类实现
     cdef c_stop_tracking_order(self, str order_id):
         raise NotImplementedError
 
+    # 需要子类重载实现，ExchangePyBase有实现
     def stop_tracking_order(self, order_id: str):
         """
         Stops tracking an in-flight order.
+        子类ExchangePyBase有实现
         """
         raise NotImplementedError
 
@@ -417,6 +442,7 @@ cdef class ConnectorBase(NetworkIterator):
     def apply_balance_update_since_snapshot(self, currency: str, available_balance: Decimal) -> Decimal:
         """
         Applies available balance update as followings
+        在get_available_balance中, 当_real_time_balance_update为False时, 用于得到实际可用余额
         :param currency: the token symbol
         :param available_balance: the current available_balance, this is also the snap balance taken since last
         _update_balances()
@@ -426,7 +452,8 @@ cdef class ConnectorBase(NetworkIterator):
         in_flight_bal = self.in_flight_asset_balances(self.in_flight_orders).get(currency, s_decimal_0)
         orders_filled_bal = self.order_filled_balances(self._in_flight_orders_snapshot_timestamp).get(currency,
                                                                                                       s_decimal_0)
-        # 逻辑重点是“可用”，为账户当前可用余额，加放到订单里用来下单的余额，减尚未成交的余额(继续占用) ，加已经成交的余额                                                                                                    
+        # 逻辑重点是“可用”，为账户当前可用余额，加自_in_flight_orders_snapshot_timestamp开始，
+        # 放到订单里用来下单的余额，减尚未成交的余额(继续占用) ，加已经成交的余额                                                                                                    
         actual_available = available_balance + snapshot_bal - in_flight_bal + orders_filled_bal
         return actual_available
 
@@ -452,9 +479,11 @@ cdef class ConnectorBase(NetworkIterator):
             available_balance = self.apply_balance_limit(currency, available_balance, balance_limit)
         return available_balance
 
+    # 注：子类ExchangeBase有重载
     cdef object c_get_price(self, str trading_pair, bint is_buy):
         return self.get_price(trading_pair, is_buy)
 
+    # 注：子类ExchangeBase有重载，直接调用c_get_price
     def get_price(self, trading_pair: str, is_buy: bool, amount: Decimal = s_decimal_NaN) -> Decimal:
         """
         Get price for the market trading pair.
@@ -469,7 +498,7 @@ cdef class ConnectorBase(NetworkIterator):
     cdef object c_get_order_price_quantum(self, str trading_pair, object price):
         return self.get_order_price_quantum(trading_pair, price)
 
-     # quantum=step
+    # quantum=step, 需要子类重载实现，ExchangePyBase有实现(注：ExchangeBase的实现无效)
     def get_order_price_quantum(self, trading_pair: str, price: Decimal) -> Decimal:
         """
         Returns a price step, a minimum price increment for a given trading pair.
@@ -480,7 +509,7 @@ cdef class ConnectorBase(NetworkIterator):
     cdef object c_get_order_size_quantum(self, str trading_pair, object order_size):
         return self.get_order_size_quantum(trading_pair, order_size)
 
-     # quantum=step
+    # quantum=step, 需要子类重载实现，ExchangePyBase有实现(注：ExchangeBase的实现无效)
     def get_order_size_quantum(self, trading_pair: str, order_size: Decimal) -> Decimal:
         """
         Returns an order amount step, a minimum amount increment for a given trading pair.
@@ -494,6 +523,7 @@ cdef class ConnectorBase(NetworkIterator):
         price_quantum = self.c_get_order_price_quantum(trading_pair, price)
         return (price // price_quantum) * price_quantum
 
+    # (注：ExchangeBase的实现重复)
     def quantize_order_price(self, trading_pair: str, price: Decimal) -> Decimal:
         """
         Applies trading rule to quantize order price.
@@ -505,12 +535,14 @@ cdef class ConnectorBase(NetworkIterator):
         order_size_quantum = self.c_get_order_size_quantum(trading_pair, amount)
         return (amount // order_size_quantum) * order_size_quantum
 
+    # (注：ExchangeBase的实现重复)
     def quantize_order_amount(self, trading_pair: str, amount: Decimal) -> Decimal:
         """
         Applies trading rule to quantize order amount.
         """
         return self.c_quantize_order_amount(trading_pair, amount)
 
+    # 需要子类重载实现，ExchangeBase有实现
     async def get_quote_price(self, trading_pair: str, is_buy: bool, amount: Decimal) -> Decimal:
         """
         Returns a quote price (or exchange rate) for a given amount, like asking how much does it cost to buy 4 apples?
@@ -521,6 +553,7 @@ cdef class ConnectorBase(NetworkIterator):
         """
         raise NotImplementedError
 
+    # 需要子类重载实现，ExchangeBase有实现
     async def get_order_price(self, trading_pair: str, is_buy: bool, amount: Decimal) -> Decimal:
         """
         Returns a price required for order submission, this price could differ from the quote price (e.g. for
@@ -562,6 +595,7 @@ cdef class ConnectorBase(NetworkIterator):
             self._trade_fee_schema = TradeFeeSchemaLoader.configured_schema_for_exchange(exchange_name=self.name)
         return self._trade_fee_schema
 
+    # 需要子类重载实现，ExchangeBase有实现
     async def all_trading_pairs(self) -> List[str]:
         """
         List of all trading pairs supported by the connector
@@ -570,6 +604,7 @@ cdef class ConnectorBase(NetworkIterator):
         """
         raise NotImplementedError
 
+    # 需要子类重载实现，直到具体交易所类(如BinancePerpetualDerivative)才实现
     async def _update_balances(self):
         """
         Update local balances requesting the latest information from the exchange.

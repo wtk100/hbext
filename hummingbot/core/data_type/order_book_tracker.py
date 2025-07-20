@@ -1,3 +1,12 @@
+#########################################################################################################################################
+# 此类是负责与交易所互动，跟踪维护Order Book信息的类，包括三部分信息：最新交易信息、订单簿增量更新、订单簿快照.
+# 1. 获取WS连接并监听OrderBook消息：trade/order_book_diff/order_book_snapshot.
+# 2. 通过Rest API获取部分信息如最新交易价格、订单簿快照(当WS更新超时).
+# 3. 解析WS消息并存入对应队列.
+# 注：与self._trading_pairs相关交易所互动有：
+#   _init_order_books: 即为了跟踪一个币对的order book而进行的初始化. self._trading_pairs若为空需测试若变动需处理(注意_order_books，
+#   _tracking_message_queues的成员管理，特别注意_tracking_tasks中的任务该取消要取消).
+#########################################################################################################################################
 import asyncio
 import logging
 import time
@@ -83,6 +92,7 @@ class OrderBookTracker:
         self._emit_trade_event_task = safe_ensure_future(
             self._emit_trade_event_loop()
         )
+        # 注意以下4个call是启动OrderBookTrackerDataSource的4个listen方法
         self._order_book_diff_listener_task = safe_ensure_future(
             self._data_source.listen_for_order_book_diffs(self._ev_loop, self._order_book_diff_stream)
         )
@@ -146,6 +156,8 @@ class OrderBookTracker:
         '''
         Updates last trade price for all order books through REST API, it is to initiate last_trade_price and as
         fall-back mechanism for when the web socket update channel fails.
+        由start开启: Order book初始化完成后, 直接开始循环检查, 如果WS更新不及时, 就通过交易所类用API获取有order book的币对的最新
+        交易价格并更新到其对应的order book对象中.
         '''
         await self._order_books_initialized.wait()
         while True:
@@ -169,12 +181,18 @@ class OrderBookTracker:
                 self.logger().network("Unexpected error while fetching last trade price.", exc_info=True)
                 await asyncio.sleep(30)
 
+    # 通过OrderBookTrackerDataSource初始化一个币对的order book.
     async def _initial_order_book_for_trading_pair(self, trading_pair: str) -> OrderBook:
         return await self._data_source.get_new_order_book(trading_pair)
 
     async def _init_order_books(self):
         """
         Initialize order books
+        由start开启: 初始化self._trading_pairs所有币对的order book. 这里包括为每个币对：
+        1. 初始化order book并放进self._order_books.
+        2. 初始化MQ并放进self._tracking_message_queues.
+        3. 开始跟踪order book并把跟踪任务放进self._tracking_tasks.
+        最后set self._order_books_initialized事件.
         """
         for index, trading_pair in enumerate(self._trading_pairs):
             self._order_books[trading_pair] = await self._initial_order_book_for_trading_pair(trading_pair)
@@ -188,6 +206,8 @@ class OrderBookTracker:
     async def _order_book_diff_router(self):
         """
         Routes the real-time order book diff messages to the correct order book.
+        从order book diff stream获取消息并存进币对对应的MQ中. 
+        注: 不等_init_order_books初始化完成, 未初始化完成的币对的diff消息会暂存至self._saved_message_queues.
         """
         last_message_timestamp: float = time.time()
         messages_queued: int = 0
@@ -196,25 +216,33 @@ class OrderBookTracker:
 
         while True:
             try:
+                # 在listen_for_order_book_diffs方法中指定由OrderBookTrackerDataSource把WS消息放进_order_book_diff_stream
                 ob_message: OrderBookMessage = await self._order_book_diff_stream.get()
                 trading_pair: str = ob_message.trading_pair
 
+                # self._tracking_message_queues中还没有币对，那么_init_order_books的初始化还没完成，此时先把diff消息存
+                # 到self._saved_message_queues并continue循环
                 if trading_pair not in self._tracking_message_queues:
                     messages_queued += 1
                     # Save diff messages received before snapshots are ready
                     self._saved_message_queues[trading_pair].append(ob_message)
                     continue
+                
+                # self._tracking_message_queues中已有币对，那么_init_order_books的初始化已经完成，此时MQ和Order Book都可以取出
                 message_queue: asyncio.Queue = self._tracking_message_queues[trading_pair]
                 # Check the order book's initial update ID. If it's larger, don't bother.
                 order_book: OrderBook = self._order_books[trading_pair]
 
+                # Order Book的状态比消息更新就忽略消息并continue
                 if order_book.snapshot_uid > ob_message.update_id:
                     messages_rejected += 1
                     continue
+                # 否则把消息放进MQ
                 await message_queue.put(ob_message)
                 messages_accepted += 1
 
                 # Log some statistics.
+                # 每60秒打印一次counters并重置counters
                 now: float = time.time()
                 if int(now / 60.0) > int(last_message_timestamp / 60.0):
                     self.logger().debug(f"Diff messages processed: {messages_accepted}, "
@@ -237,6 +265,8 @@ class OrderBookTracker:
     async def _order_book_snapshot_router(self):
         """
         Route the real-time order book snapshot messages to the correct order book.
+        从order book snapshot stream获取消息并存进币对对应的MQ中. 
+        注: 要等_init_order_books初始化完成, 完成后仍未初始化的币对snapshot消息会忽略.
         """
         await self._order_books_initialized.wait()
         while True:
@@ -266,11 +296,13 @@ class OrderBookTracker:
                 saved_messages: Deque[OrderBookMessage] = self._saved_message_queues[trading_pair]
 
                 # Process saved messages first if there are any
+                # 如果有order book初始化完成之前就存下来的消息，先处理
                 if len(saved_messages) > 0:
                     message = saved_messages.popleft()
                 else:
                     message = await message_queue.get()
 
+                # 对于diff消息，一边处理一边存下来放在past_diffs_window中，以备在收到的snapshot上使用
                 if message.type is OrderBookMessageType.DIFF:
                     order_book.apply_diffs(message.bids, message.asks, message.update_id)
                     past_diffs_window.append(message)
@@ -282,6 +314,7 @@ class OrderBookTracker:
                         self.logger().debug(f"Processed {diff_messages_accepted} order book diffs for {trading_pair}.")
                         diff_messages_accepted = 0
                     last_message_timestamp = now
+                # 对于snapshot消息，用snapshot重置后，还需用应用所有更新的diff消息，从而把order book恢复到最新状态
                 elif message.type is OrderBookMessageType.SNAPSHOT:
                     past_diffs: List[OrderBookMessage] = list(past_diffs_window)
                     order_book.restore_from_snapshot_and_diffs(message, past_diffs)

@@ -1,3 +1,14 @@
+#########################################################################################################################################
+# 此类是负责与交易所互动，获取Order Book信息的基类，每个交易所有对应子类，包括三部分信息：最新交易信息、订单簿增量更新、订单簿快照.
+# 1. 获取WS连接并监听OrderBook消息：trade/order_book_diff/order_book_snapshot，机制主要为：
+#    a. 定义三种消息各自的MQ.
+#    b. listen_for_subscriptions方法连接、订阅、处理WS消息并放到对应的MQ中.
+#    c. listen_for_order_book_diffs/listen_for_order_book_snapshot/listen_for_trades分别从三个MQ获取和解析消息并放到OrderBookTracker通过
+#       参数传过来的MQ(_order_book_diff_stream/_order_book_snapshot_stream/_order_book_trade_stream).
+# 2. 另外有定义通过Rest API获取部分信息如最新交易价格、订单簿快照(当WS更新超时).
+# 注：与self._trading_pairs相关交易所互动有：
+#   _request_order_book_snapshots: 即当从WS更新订单簿快照消息超时时转而用API获取. self._trading_pairs若为空若变动均无影响.
+#########################################################################################################################################
 import asyncio
 import logging
 import time
@@ -17,12 +28,15 @@ class OrderBookTrackerDataSource(metaclass=ABCMeta):
     _logger: Optional[HummingbotLogger] = None
 
     def __init__(self, trading_pairs: List[str]):
+        # 三类消息在self._message_queue中的key
         self._trade_messages_queue_key = "trade"
         self._diff_messages_queue_key = "order_book_diff"
         self._snapshot_messages_queue_key = "order_book_snapshot"
 
         self._trading_pairs: List[str] = trading_pairs
+        # Order Book创建函数即OrderBook类构造函数
         self._order_book_create_function = lambda: OrderBook()
+        # 三类消息的MQ
         self._message_queue: Dict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
 
     @classmethod
@@ -115,6 +129,7 @@ class OrderBookTrackerDataSource(metaclass=ABCMeta):
         output queue.
         This method also request the full order book content from the exchange using HTTP requests if it does not
         receive events during one hour.
+        注: 某些交易所重载了此方法, 不一定优先用WS超时再用API, 如Binance直接用API.
 
         :param ev_loop: the event loop the method will run in
         :param output: a queue to add the created snapshot messages
@@ -210,6 +225,8 @@ class OrderBookTrackerDataSource(metaclass=ABCMeta):
     def _channel_originating_message(self, event_message: Dict[str, Any]) -> str:
         """
         Identifies the channel for a particular event message. Used to find the correct queue to add the message in
+        具体交易所obds才实现; 用于_process_websocket_messages中判断WS消息属于什么消息并放到对应message_queue里;
+        此类定义三种MQ: trade/order_book_diff/order_book_snapshot, 子类PerpetualAPIOrderBookDataSource增加funding_info.
 
         :param event_message: the event received through the websocket connection
 

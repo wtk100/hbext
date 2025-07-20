@@ -1,3 +1,6 @@
+#########################################################################################################################################
+# Order Book信息增、删、查操作维护，包括最新的ask entries/bid entries/trade.
+#########################################################################################################################################
 # distutils: language=c++
 # distutils: sources=hummingbot/core/cpp/OrderBookEntry.cpp
 import bisect
@@ -26,6 +29,7 @@ from hummingbot.core.data_type.order_book_row import OrderBookRow
 from hummingbot.core.data_type.OrderBookEntry cimport truncateOverlapEntries
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.event.events import (
+    # OrderBookEvent: TradeEvent, OrderBookDataSourceUpdateEvent
     OrderBookEvent,
     OrderBookTradeEvent
 )
@@ -483,7 +487,10 @@ cdef class OrderBook(PubSub):
         return self.c_get_quote_volume_for_price(is_buy, price)
 
     def restore_from_snapshot_and_diffs(self, snapshot: OrderBookMessage, diffs: List[OrderBookMessage]):
+        # bisect_right查找插入snapshot到diffs的位置, 使得diffs[:p]都小于snapshot，diffs[p:]都大于snapshot
+        # OrderBookMessage有实现__lt__，支持bisect查找插入snapshot到diffs的位置时对其按业务逻辑排序
         replay_position = bisect.bisect_right(diffs, snapshot)
+        # replay_diffs为snapshot之后的diff消息
         replay_diffs = diffs[replay_position:]
         self.apply_snapshot(snapshot.bids, snapshot.asks, snapshot.update_id)
         for diff in replay_diffs:

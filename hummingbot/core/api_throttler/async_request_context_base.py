@@ -16,6 +16,7 @@ class AsyncRequestContextBase(ABC):
     """
     An async context class ('async with' syntax) that checks for rate limit and waits for the capacity to be freed.
     It uses an async lock to prevent multiple instances of this class from accessing the `acquire()` function.
+    作为context对象, 管理并判断是否允许新API Request发送, 确保不超过其RateLimit
     """
 
     _last_max_cap_warning_ts: float = 0.0
@@ -53,6 +54,7 @@ class AsyncRequestContextBase(ABC):
     def flush(self):
         """
         Remove task logs that have passed rate limit periods
+        将不在当前限流周期内的老request从_task_log中释放掉
         :return:
         """
         now: Decimal = Decimal(str(time.time()))
@@ -66,6 +68,7 @@ class AsyncRequestContextBase(ABC):
     def within_capacity(self) -> bool:
         raise NotImplementedError
 
+    # 循环判断当前是否可以再容纳新的request直到等到可以容纳
     async def acquire(self):
         while True:
             async with self._lock:
@@ -87,6 +90,9 @@ class AsyncRequestContextBase(ABC):
             for limit, weight in self._related_limits:
                 self._task_logs.append(TaskLog(timestamp=now, rate_limit=limit, weight=weight))
 
+    # with语句执行时执行此方法
+    # 如在RestAssistant.execute_request_and_get_response中调用call request之前有：
+    # async with self._throttler.execute_task(limit_id=throttler_limit_id))，此语句初始化AsyncRequestContext对象(并执行此方法)
     async def __aenter__(self):
         await self.acquire()
 

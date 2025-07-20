@@ -133,7 +133,7 @@ async def quick_start(args: argparse.Namespace, secrets_manager: BaseSecretsMana
     # 检查配置项是否提供完整
     if strategy_config is not None:
         if not all_configs_complete(strategy_config, hb.client_config_map):
-            # 方法来自StatusCommand，执行配置项、解密、网络等检查
+            # 方法来自StatusCommand，执行配置项、解密、网络等检查(HummingbotApplication继承了所有commands)
             hb.status()
 
     # The listener needs to have a named variable for keeping reference, since the event listener system

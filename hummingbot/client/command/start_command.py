@@ -109,7 +109,7 @@ class StartCommand(GatewayChainApiManager):
             file_name = script.split(".")[0]
             self.strategy_name = file_name
             self.strategy_file_name = conf if conf else file_name
-            # 方法来自StatusCommand
+        # 方法来自StatusCommand
         elif not await self.status_check_all(notify_success=False):
             self.notify("Status checks failed. Start aborted.")
             self._in_start_check = False
@@ -199,6 +199,7 @@ class StartCommand(GatewayChainApiManager):
         markets_list = []
         for conn, pairs in script_strategy.markets.items():
             markets_list.append((conn, list(pairs)))
+        # 此方法来自HummingbotApplication(继承了所有commands) 
         self._initialize_markets(markets_list)
         if config:
             self.strategy = script_strategy(self.markets, config)
@@ -264,6 +265,7 @@ class StartCommand(GatewayChainApiManager):
                         await market.cancel_all(10.0)
             if self.strategy:
                 self.clock.add_iterator(self.strategy)
+            # 确保_run_clock被调度起来运行，随即clock会触发connector和strategy的start函数
             self.strategy_task: asyncio.Task = safe_ensure_future(self._run_clock(), loop=self.ev_loop)
             self.notify(f"\n'{self.strategy_name}' strategy started.\n"
                         f"Run `status` command to query the progress.")
