@@ -20,7 +20,7 @@ from pydantic_core import PydanticUndefinedType
 from yaml import SafeDumper
 
 from hummingbot import get_strategy_list, root_path
-from hummingbot.client.config.client_config_map import ClientConfigMap, CommandShortcutModel
+from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_data_types import BaseClientModel, ClientConfigEnum, ClientFieldData
 from hummingbot.client.config.config_var import ConfigVar
 from hummingbot.client.config.fee_overrides_config_map import fee_overrides_config_map, init_fee_overrides_config
@@ -104,7 +104,7 @@ class ClientConfigAdapter:
         return self._hb_config.is_required(attr)
 
     def keys(self) -> Generator[str, None, None]:
-        return self._hb_config.model_fields.keys()
+        return self._hb_config.__class__.model_fields.keys()
 
     # 获取config对象所有item的config path
     def config_paths(self) -> Generator[str, None, None]:
@@ -120,7 +120,7 @@ class ClientConfigAdapter:
         """
         # config item的层级从0开始
         depth = 0
-        for attr, field_info in self._hb_config.model_fields.items():
+        for attr, field_info in self._hb_config.__class__.model_fields.items():
             type_ = field_info.annotation
             if hasattr(self, attr):
                 value = getattr(self, attr)
@@ -172,7 +172,7 @@ class ClientConfigAdapter:
         return secure
 
     def get_client_data(self, attr_name: str) -> Optional[ClientFieldData]:
-        json_schema_extra = self._hb_config.model_fields[attr_name].json_schema_extra or {}
+        json_schema_extra = self._hb_config.__class__.model_fields[attr_name].json_schema_extra or {}
         client_data = ClientFieldData(
             prompt=json_schema_extra.get("prompt"),
             prompt_on_new=json_schema_extra.get("prompt_on_new", False),
@@ -183,10 +183,10 @@ class ClientConfigAdapter:
         return client_data
 
     def get_description(self, attr_name: str) -> str:
-        return self._hb_config.model_fields[attr_name].description
+        return self._hb_config.__class__.model_fields[attr_name].description
 
     def get_default(self, attr_name: str) -> Any:
-        default = self._hb_config.model_fields[attr_name].default
+        default = self._hb_config.__class__.model_fields[attr_name].default
         if isinstance(default, type(Ellipsis)) or isinstance(default, PydanticUndefinedType):
             default = None
         return default
@@ -205,7 +205,7 @@ class ClientConfigAdapter:
         return default_str
 
     def get_type(self, attr_name: str) -> Type:
-        return self._hb_config.model_fields[attr_name].annotation
+        return self._hb_config.__class__.model_fields[attr_name].annotation
 
     # 为config对象内容生成yaml
     def generate_yml_output_str_with_comments(self) -> str:
@@ -223,7 +223,7 @@ class ClientConfigAdapter:
             setattr(self, attr, value)
 
     def full_copy(self):
-        return self.__class__(hb_config=self._hb_config.copy(deep=True))
+        return self.__class__(hb_config=self._hb_config.model_copy(deep=True))
 
     def decrypt_all_secure_data(self):
         from hummingbot.client.config.security import Security  # avoids circular import
@@ -277,7 +277,7 @@ class ClientConfigAdapter:
     # 将config对象转换成含嵌套关系、加密后的dict
     def _dict_in_conf_order(self) -> Dict[str, Any]:
         conf_dict = {}
-        for attr in self._hb_config.model_fields.keys():
+        for attr in self._hb_config.__class__.model_fields.keys():
             value = getattr(self, attr)
             # 递归处理嵌套config对象
             if isinstance(value, ClientConfigAdapter):
@@ -292,6 +292,8 @@ class ClientConfigAdapter:
         for attr, value in conf_dict.items():
             if isinstance(value, SecretStr):
                 clear_text_value = value.get_secret_value() if isinstance(value, SecretStr) else value
+                if not Security.secrets_manager:
+                    logging.getLogger().warning(f"Ignore the following error if your config file {attr} contains secret(s)")
                 conf_dict[attr] = Security.secrets_manager.encrypt_secret_value(attr, clear_text_value)
 
     # 解密SecretStr字段值
@@ -414,10 +416,6 @@ def path_representer(dumper: SafeDumper, data: Path):
     return dumper.represent_str(str(data))
 
 
-def command_shortcut_representer(dumper: SafeDumper, data: CommandShortcutModel):
-    return dumper.represent_dict(data.__dict__)
-
-
 def client_config_adapter_representer(dumper: SafeDumper, data: ClientConfigAdapter):
     return dumper.represent_dict(data._dict_in_conf_order())
 
@@ -447,9 +445,6 @@ yaml.add_representer(
 )
 yaml.add_representer(
     data_type=PosixPath, representer=path_representer, Dumper=SafeDumper
-)
-yaml.add_representer(
-    data_type=CommandShortcutModel, representer=command_shortcut_representer, Dumper=SafeDumper
 )
 yaml.add_representer(
     data_type=ClientConfigAdapter, representer=client_config_adapter_representer, Dumper=SafeDumper
@@ -996,8 +991,3 @@ def parse_config_default_to_text(config: ConfigVar) -> str:
 
 def retrieve_validation_error_msg(e: ValidationError) -> str:
     return e.errors().pop()["msg"]
-
-
-def save_previous_strategy_value(file_name: str, client_config_map: ClientConfigAdapter):
-    client_config_map.previous_strategy = file_name
-    save_to_yml(CLIENT_CONFIG_PATH, client_config_map)

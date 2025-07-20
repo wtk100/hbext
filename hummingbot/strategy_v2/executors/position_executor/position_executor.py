@@ -168,7 +168,7 @@ class PositionExecutor(ExecutorBase):
         Get the filled amount of the position in quote currency.
         此仓位的总成交量, 以Quote Asset计
         """
-        return self.open_filled_amount_quote + self.close_filled_amount_quote
+        return self.open_filled_amount_quote + self.close_filled_amount_quote if self.close_type != CloseType.POSITION_HOLD else Decimal("0")
 
     @property
     def is_expired(self) -> bool:
