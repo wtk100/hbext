@@ -42,6 +42,8 @@ class WSConnection:
             autoping=False,
             heartbeat=ping_timeout,
             max_msg_size=max_msg_size,
+            # 添加WS代理，only for local dev/test
+            proxy="http://127.0.0.1:7897",
         )
         self._message_timeout = message_timeout
         self._connected = True

@@ -48,7 +48,8 @@ class ConnectionsFactory:
         Lazily create a shared aiohttp.ClientSession if not already available.
         """
         if self._shared_client is None:
-            self._shared_client = aiohttp.ClientSession()
+            # 添加trust_env=True，信任环境变量相关代理设置，only for local dev/tst
+            self._shared_client = aiohttp.ClientSession(trust_env=True)
         return self._shared_client
 
     async def close(self) -> None:
