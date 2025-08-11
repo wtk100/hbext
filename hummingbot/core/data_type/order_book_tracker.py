@@ -206,7 +206,7 @@ class OrderBookTracker:
     async def _order_book_diff_router(self):
         """
         Routes the real-time order book diff messages to the correct order book.
-        从order book diff stream获取消息并存进币对对应的MQ中. 
+        从order book diff stream获取消息并 转存 进每个币对对应的MQ中. 
         注: 不等_init_order_books初始化完成, 未初始化完成的币对的diff消息会暂存至self._saved_message_queues.
         """
         last_message_timestamp: float = time.time()
@@ -265,7 +265,7 @@ class OrderBookTracker:
     async def _order_book_snapshot_router(self):
         """
         Route the real-time order book snapshot messages to the correct order book.
-        从order book snapshot stream获取消息并存进币对对应的MQ中. 
+        从order book snapshot stream获取消息并 转存 进每个币对对应的MQ中. 
         注: 要等_init_order_books初始化完成, 完成后仍未初始化的币对snapshot消息会忽略.
         """
         await self._order_books_initialized.wait()

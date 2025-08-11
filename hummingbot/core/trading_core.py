@@ -261,7 +261,11 @@ class TradingCore:
         return self.connector_manager.remove_connector(connector_name)
 
     def detect_strategy_type(self, strategy_name: str) -> StrategyType:
-        """Detect the type of strategy."""
+        """
+        Detect the type of strategy.
+        如果策略的py文件在/scripts目录下, 如果是StrategyV2Base子类则为V2策略, 否则为一般script策略
+        如果是/hummingbot/strategy目录下的子目录, 则为传统策略
+        """
         if self.is_script_strategy(strategy_name):
             # Check if it's a V2 strategy by examining the script
             return StrategyType.V2 if self._is_v2_script_strategy(strategy_name) else StrategyType.SCRIPT
@@ -319,6 +323,7 @@ class TradingCore:
     def load_script_class(self, script_name: str) -> Tuple[Type, Optional[BaseClientModel]]:
         """
         Load script strategy class following Hummingbot's pattern.
+        根据策略名称加载策略类及其配置信息对象并返回(注意这里调用了策略类的类方法init_markets)
 
         Args:
             script_name: Name of the script strategy
@@ -417,11 +422,14 @@ class TradingCore:
             self._strategy_file_name = strategy_file_name or strategy_name
 
             # Store config for later use
+            # 如果strategy_config是str则为配置文件路径
             if isinstance(strategy_config, str):
                 # File path - will be loaded by _load_strategy_config
                 self._config_source = strategy_config
+            # 如果strategy_config是dict则初始化self._config_data
             elif isinstance(strategy_config, dict):
                 self._config_data = strategy_config
+            # 如果strategy_config是BaseStrategyConfigMap对象
             else:
                 self.strategy_config_map = strategy_config
 
@@ -429,6 +437,8 @@ class TradingCore:
             strategy_type = self.detect_strategy_type(strategy_name)
 
             if strategy_type == StrategyType.SCRIPT or strategy_type == StrategyType.V2:
+                # 加载策略类及其配置信息对象，然后根据策略类的类变量markets初始化交易所(并交给clock和markets_recorder)，
+                # 最后用交易所和策略配置信息对象初始化策略对象
                 await self._initialize_script_strategy()
             elif strategy_type == StrategyType.REGULAR:
                 await self._initialize_regular_strategy()
@@ -436,9 +446,11 @@ class TradingCore:
                 raise ValueError(f"Unknown strategy type: {strategy_type}")
 
             # Initialize markets for backward compatibility
+            # 初始化self.market_trading_pairs_map和self.market_trading_pairs_tuples
             self._initialize_markets_for_strategy()
 
             # Start the trading execution loop
+            # 确保markets_recorder初始化完成，clock启动，然后把策略交给clock驱动，启动kill_switch并交给clock驱动
             await self._start_strategy_execution()
 
             # Start rate oracle (required for PNL calculation)
@@ -634,6 +646,7 @@ class TradingCore:
             )
 
             # Add to clock if running
+            # 注：如果clock没run就不加，self.start_clock方法会加
             if self.clock and connector:
                 self.clock.add_iterator(connector)
 

@@ -3,6 +3,7 @@
 # 相比基类OrderBookTrackerDataSource，新增：
 # 1. 从WS监听funding_info消息.
 # 2. 获取和存储funding_info的消息队列.
+# 注: 无与self._trading_pairs相关的操作.
 #########################################################################################################################################
 import asyncio
 from abc import ABC, abstractmethod

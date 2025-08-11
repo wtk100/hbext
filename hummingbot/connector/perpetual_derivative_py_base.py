@@ -4,7 +4,7 @@
 # 2. 监听资金费率信息相关定义(包括start_network增加资金费率信息监听).
 # 3. 持续获取资金费支付信息的相关定义(包括start_network增加开启资金费支付信息polling、tick增加驱动资金费率polling的事件的定义).
 # 4. 交易所ready状态检查增加资金费率是否初始化.
-# 注:此类开始定义了self._trading_pairs，用于：
+# 注:此类尚未定义self._trading_pairs(具体交易所类才定义)，但来自父类ExchangePyBase的trading_pairs属性用于：
 #    1. 初始化PerpetualTrading，在其中用于检查是否所有币对都在其self._funding_info里存在即是否所有币对都已初始化funding info. 
 #    2. _execute_set_position_mode, 用于设置币对的position mode, 当self._trading_pairs为空时需测试，变动时需要处理新币对.
 #    3. _init_funding_info, 用于API初始化币对funding info, 当self._trading_pairs为空时需测试，变动时需要处理新币对.
