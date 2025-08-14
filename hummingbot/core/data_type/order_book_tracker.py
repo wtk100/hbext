@@ -6,6 +6,7 @@
 # 注：与self._trading_pairs相关交易所互动有：
 #   _init_order_books: 即为了跟踪一个币对的order book而进行的初始化. self._trading_pairs若为空需测试若变动需处理(注意_order_books，
 #   _tracking_message_queues的成员管理，特别注意_tracking_tasks中的任务该取消要取消).
+#   同时，当self._trading_pairs变动时，应先处理OrderBookTrackerDataSource.
 #########################################################################################################################################
 import asyncio
 import logging

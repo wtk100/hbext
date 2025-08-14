@@ -40,6 +40,7 @@ cdef class ExchangeBase(ConnectorBase):
         super().__init__(client_config_map)
         self._order_book_tracker = None
         self._budget_checker = BudgetChecker(exchange=self)
+        # map item: [exchange_symbol, hb_trading_pair]
         self._trading_pair_symbol_map: Optional[Mapping[str, str]] = None
         self._mapping_initialization_lock = asyncio.Lock()
 

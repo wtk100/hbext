@@ -326,7 +326,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
         )
 
         if not success:
-            # 若有一个币对设置失败的话，就把设置成功的币对改回默认mode
+            # 若有一个币对设置失败的话，就把设置成功的币对改回默认的或之前的mode
             await self._execute_set_position_mode_for_pairs(
                 mode=self._perpetual_trading.position_mode, trading_pairs=successful_pairs
             )
@@ -341,7 +341,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
                     ),
                 )
         else:
-            # 设置成功的话就把_perpetual_trading对象里的position mode也更新
+            # 若全部设置成功的话就把_perpetual_trading对象里的position mode也更新
             self._perpetual_trading.set_position_mode(mode)
             for trading_pair in self.trading_pairs:
                 self.trigger_event(
