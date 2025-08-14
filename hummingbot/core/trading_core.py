@@ -12,7 +12,7 @@ from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_data_types import BaseClientModel
 from hummingbot.client.config.config_helpers import ClientConfigAdapter, get_strategy_starter_file
 from hummingbot.client.config.strategy_config_data_types import BaseStrategyConfigMap
-from hummingbot.client.settings import SCRIPT_STRATEGIES_MODULE, STRATEGIES
+from hummingbot.client.settings import SCRIPT_STRATEGIES_MODULE, SCRIPT_STRATEGIES_PATH, STRATEGIES
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.connector.markets_recorder import MarketsRecorder
 from hummingbot.core.clock import Clock, ClockMode
@@ -60,9 +60,11 @@ class TradingCore:
             s_logger = logging.getLogger(__name__)
         return s_logger
 
-    def __init__(self,
-                 client_config: Union[ClientConfigMap, ClientConfigAdapter, Dict[str, Any]],
-                 scripts_path: Optional[Path] = None):
+    def __init__(
+        self,
+        client_config: Union[ClientConfigMap, ClientConfigAdapter, Dict[str, Any]],
+        scripts_path: Optional[Path] = None,
+    ):
         """
         Initialize the trading core.
 
@@ -79,7 +81,7 @@ class TradingCore:
             self.client_config_map = client_config
 
         # Strategy paths
-        self.scripts_path = scripts_path or Path("scripts")
+        self.scripts_path = scripts_path or Path(SCRIPT_STRATEGIES_PATH)
 
         # Core components
         self.connector_manager = ConnectorManager(self.client_config_map)
@@ -205,11 +207,13 @@ class TradingCore:
             self.logger().error(f"Failed to stop clock: {e}")
             return False
 
-    async def create_connector(self,
-                               connector_name: str,
-                               trading_pairs: List[str],
-                               trading_required: bool = True,
-                               api_keys: Optional[Dict[str, str]] = None) -> ExchangeBase:
+    def create_connector(
+        self,
+        connector_name: str,
+        trading_pairs: List[str],
+        trading_required: bool = True,
+        api_keys: Optional[Dict[str, str]] = None,
+    ) -> ExchangeBase:
         """
         Create a connector instance.
 
@@ -222,9 +226,7 @@ class TradingCore:
         Returns:
             ExchangeBase: Created connector
         """
-        connector = self.connector_manager.create_connector(
-            connector_name, trading_pairs, trading_required, api_keys
-        )
+        connector = self.connector_manager.create_connector(connector_name, trading_pairs, trading_required, api_keys)
 
         # Add to clock if running
         if self.clock and connector:
@@ -301,16 +303,14 @@ class TradingCore:
         if db_name.endswith(".yml") or db_name.endswith(".py"):
             db_name = db_name.split(".")[0]
 
-        self.trade_fill_db = SQLConnectionManager.get_trade_fills_instance(
-            self.client_config_map, db_name
-        )
+        self.trade_fill_db = SQLConnectionManager.get_trade_fills_instance(self.client_config_map, db_name)
 
         self.markets_recorder = MarketsRecorder(
             self.trade_fill_db,
             list(self.connector_manager.connectors.values()),
             self._strategy_file_name or db_name,
             self.strategy_name or db_name,
-            self.client_config_map.market_data_collection
+            self.client_config_map.market_data_collection,
         )
 
         self.markets_recorder.start()
@@ -335,20 +335,30 @@ class TradingCore:
             script_module = importlib.import_module(f".{script_name}", package=SCRIPT_STRATEGIES_MODULE)
 
         try:
-            script_class = next((member for member_name, member in inspect.getmembers(script_module)
-                                 if inspect.isclass(member) and
-                                 issubclass(member, ScriptStrategyBase) and
-                                 member not in [ScriptStrategyBase, DirectionalStrategyBase, StrategyV2Base]))
+            script_class = next(
+                (
+                    member
+                    for member_name, member in inspect.getmembers(script_module)
+                    if inspect.isclass(member)
+                    and issubclass(member, ScriptStrategyBase)
+                    and member not in [ScriptStrategyBase, DirectionalStrategyBase, StrategyV2Base]
+                )
+            )
         except StopIteration:
             raise InvalidScriptModule(f"The module {script_name} does not contain any subclass of ScriptStrategyBase")
 
         # Load config if strategy and file names differ
         if self.strategy_name != self._strategy_file_name and self._strategy_file_name:
             try:
-                config_class = next((member for member_name, member in inspect.getmembers(script_module)
-                                     if inspect.isclass(member) and
-                                     issubclass(member, BaseClientModel) and
-                                     member not in [BaseClientModel, StrategyV2ConfigBase]))
+                config_class = next(
+                    (
+                        member
+                        for member_name, member in inspect.getmembers(script_module)
+                        if inspect.isclass(member)
+                        and issubclass(member, BaseClientModel)
+                        and member not in [BaseClientModel, StrategyV2ConfigBase]
+                    )
+                )
                 # Load config from provided config dict or file
                 config_data = self._load_strategy_config()
                 config = config_class(**config_data)
@@ -387,16 +397,18 @@ class TradingCore:
                 # Assume it's in the script config directory
                 config_path = SCRIPT_STRATEGY_CONF_DIR_PATH / config_file_path
 
-            with open(config_path, 'r') as file:
+            with open(config_path, "r") as file:
                 return yaml.safe_load(file)
         except Exception as e:
             self.logger().warning(f"Failed to load config file {config_file_path}: {e}")
             return {}
 
-    async def start_strategy(self,
-                             strategy_name: str,
-                             strategy_config: Optional[Union[BaseStrategyConfigMap, Dict[str, Any], str]] = None,
-                             strategy_file_name: Optional[str] = None) -> bool:
+    async def start_strategy(
+        self,
+        strategy_name: str,
+        strategy_config: Optional[Union[BaseStrategyConfigMap, Dict[str, Any], str]] = None,
+        strategy_file_name: Optional[str] = None,
+    ) -> bool:
         """
         Start a trading strategy.
 
@@ -503,8 +515,10 @@ class TradingCore:
                         self.markets_recorder.restore_market_states(self._strategy_file_name, market)
 
             # Initialize kill switch if enabled
-            if (self._trading_required and
-                    self.client_config_map.kill_switch_mode.model_config.get("title") == "kill_switch_enabled"):
+            if (
+                self._trading_required
+                and self.client_config_map.kill_switch_mode.model_config.get("title") == "kill_switch_enabled"
+            ):
                 self.kill_switch = self.client_config_map.kill_switch_mode.get_kill_switch(self)
                 await self._wait_till_ready(self.kill_switch.start)
                 if self.clock:
@@ -596,16 +610,17 @@ class TradingCore:
     def get_status(self) -> Dict[str, Any]:
         """Get current status of the trading engine."""
         return {
-            'clock_running': self._is_running,
-            'strategy_running': self._strategy_running,
-            'strategy_name': self.strategy_name,
-            'strategy_file_name': self._strategy_file_name,
-            'strategy_type': self.detect_strategy_type(self.strategy_name).value if self.strategy_name else None,
-            'start_time': self.start_time,
-            'uptime': (time.time() * 1e3 - self.start_time) if self.start_time else 0,
-            'connectors': self.connector_manager.get_status(),
-            'kill_switch_enabled': self.client_config_map.kill_switch_mode.model_config.get("title") == "kill_switch_enabled",
-            'markets_recorder_active': self.markets_recorder is not None,
+            "clock_running": self._is_running,
+            "strategy_running": self._strategy_running,
+            "strategy_name": self.strategy_name,
+            "strategy_file_name": self._strategy_file_name,
+            "strategy_type": self.detect_strategy_type(self.strategy_name).value if self.strategy_name else None,
+            "start_time": self.start_time,
+            "uptime": (time.time() * 1e3 - self.start_time) if self.start_time else 0,
+            "connectors": self.connector_manager.get_status(),
+            "kill_switch_enabled": self.client_config_map.kill_switch_mode.model_config.get("title")
+            == "kill_switch_enabled",
+            "markets_recorder_active": self.markets_recorder is not None,
         }
 
     def add_notifier(self, notifier: NotifierBase):
@@ -629,9 +644,7 @@ class TradingCore:
         """
         # Create connectors for each market
         for connector_name, trading_pairs in market_names:
-            connector = self.connector_manager.create_connector(
-                connector_name, trading_pairs, self._trading_required
-            )
+            connector = self.connector_manager.create_connector(connector_name, trading_pairs, self._trading_required)
 
             # Add to clock if running
             if self.clock and connector:
@@ -707,3 +720,17 @@ class TradingCore:
         except Exception as e:
             self.logger().error(f"Error during shutdown: {e}")
             return False
+
+    def add_trading_pairs(self, connector_name: str, trading_pairs: List[str]) -> ExchangeBase:
+        self.remove_connector(connector_name)
+        existing_pairs = self.market_trading_pairs_map[connector_name]
+        all_pairs = list(set(existing_pairs + trading_pairs))
+        new_connector = self.create_connector(connector_name, all_pairs)
+        self._initialize_markets_for_strategy()
+        return new_connector
+
+    def reset_trading_pairs(self, connector_name: str, trading_pairs: List[str]) -> ExchangeBase:
+        self.remove_connector(connector_name)
+        new_connector = self.create_connector(connector_name, trading_pairs)
+        self._initialize_markets_for_strategy()
+        return new_connector
