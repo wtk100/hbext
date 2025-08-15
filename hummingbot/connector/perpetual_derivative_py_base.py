@@ -6,9 +6,9 @@
 # 4. 交易所ready状态检查增加资金费率是否初始化.
 # 注:此类开始定义了self._trading_pairs，用于：
 #    1. 初始化PerpetualTrading，在其中用于检查是否所有币对都在其self._funding_info里存在即是否所有币对都已初始化funding info. 
-#    2. _execute_set_position_mode, 用于设置币对的position mode, 当self._trading_pairs为空时需测试，变动时需要处理新币对.
-#    3. _init_funding_info, 用于API初始化币对funding info, 当self._trading_pairs为空时需测试，变动时需要处理新币对.
-#    4. _update_all_funding_payments, 用于API更新币对funding payment，当self._trading_pairs为空或变动时无需额外处理.
+#    2. _execute_set_position_mode, 用于初始化币对position mode, 当self._trading_pairs为空时正常执行，变动时需要处理新币对.
+#    3. _init_funding_info, 用于API初始化币对funding info, 当self._trading_pairs为空时正常执行，变动时需要处理新币对.
+#    4. _update_all_funding_payments, 用于周期性用API更新币对funding payment，当self._trading_pairs为空或变动时无需额外处理.
 ########################################################################################################################
 import asyncio
 from abc import ABC, abstractmethod
