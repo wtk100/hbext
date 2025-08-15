@@ -2,6 +2,7 @@ import asyncio
 import copy
 import logging
 import math
+import time
 from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, AsyncIterable, Callable, Dict, List, Optional, Tuple
@@ -83,6 +84,8 @@ class ExchangePyBase(ExchangeBase, ABC):
 
         self._order_tracker: ClientOrderTracker = self._create_order_tracker()
 
+        self._trading_pairs_deactivation_timestamp: Dict[str, float] = {}
+
     @classmethod
     def logger(cls) -> HummingbotLogger:
         if cls._logger is None:
@@ -139,6 +142,15 @@ class ExchangePyBase(ExchangeBase, ABC):
     def trading_pairs(self) -> List[str]:
         raise NotImplementedError
 
+    @trading_pairs.setter
+    def trading_pairs(self, trading_pairs: List[str]) -> List[str]:
+        raise NotImplementedError
+
+    @property
+    def trading_pairs_copy(self) -> List[str]:
+        """add a copy getter"""
+        return copy.deepcopy(self.trading_pairs)
+
     @property
     @abstractmethod
     def is_cancel_request_in_exchange_synchronous(self) -> bool:
@@ -193,6 +205,48 @@ class ExchangePyBase(ExchangeBase, ABC):
         Returns a dictionary associating current active orders client id to their JSON representation
         """
         return {key: value.to_json() for key, value in self._order_tracker.all_updatable_orders.items()}
+
+    @abstractmethod
+    async def initialize_trading_pairs(self, trading_pairs: List[str]):
+        """xxx"""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def purge_trading_pairs(self, trading_pairs: List[str]):
+        """xxx"""
+        raise NotImplementedError
+
+    def check_remove_trading_pairs(self):
+        """xxx"""
+        tp_copy = self.trading_pairs_copy
+        tpdt = copy.deepcopy(self._trading_pairs_deactivation_timestamp)
+        for tp, ts in self._trading_pairs_deactivation_timestamp.items():
+            if time.time() - ts > 60 * 60 * 10:
+                tp_copy.remove(tp)
+                tpdt.pop(tp)
+        self._trading_pairs_deactivation_timestamp = tpdt
+        self.trading_pairs = tp_copy
+
+    def activate_trading_pairs(self, trading_pairs: List[str]):
+        """xxx"""
+        new_trading_pairs = [tp for tp in trading_pairs if tp not in self.trading_pairs]
+        if new_trading_pairs and len(new_trading_pairs) > 0:
+            safe_ensure_future(self.initialize_trading_pairs(new_trading_pairs))
+            tp_copy = self.trading_pairs_copy
+            tp_copy.extend(new_trading_pairs)
+            self.trading_pairs = tp_copy
+            for tp in self.trading_pairs:
+                if tp in self._trading_pairs_deactivation_timestamp:
+                    self._trading_pairs_deactivation_timestamp.pop(tp)
+            self.check_remove_trading_pairs()
+
+    def deactivate_trading_pairs(self, trading_pairs: List[str]):
+        """xxx"""
+        safe_ensure_future(self.purge_trading_pairs(trading_pairs))
+        for tp in trading_pairs:
+            if tp in self.trading_pairs and tp not in self._trading_pairs_deactivation_timestamp:
+                self._trading_pairs_deactivation_timestamp[tp] = time.time()
+        self.check_remove_trading_pairs()
 
     @abstractmethod
     def supported_order_types(self) -> List[OrderType]:
