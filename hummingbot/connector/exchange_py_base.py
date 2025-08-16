@@ -220,10 +220,13 @@ class ExchangePyBase(ExchangeBase, ABC):
         """xxx"""
         tp_copy = self.trading_pairs_copy
         tpdt = copy.deepcopy(self._trading_pairs_deactivation_timestamp)
+        tp_to_remove = []
         for tp, ts in self._trading_pairs_deactivation_timestamp.items():
             if time.time() - ts > 60 * 60 * 10:
                 tp_copy.remove(tp)
                 tpdt.pop(tp)
+                tp_to_remove.extend(tp)
+        safe_ensure_future(self.purge_trading_pairs(tp_to_remove))
         self._trading_pairs_deactivation_timestamp = tpdt
         self.trading_pairs = tp_copy
 
@@ -240,13 +243,22 @@ class ExchangePyBase(ExchangeBase, ABC):
                     self._trading_pairs_deactivation_timestamp.pop(tp)
             self.check_remove_trading_pairs()
 
-    def deactivate_trading_pairs(self, trading_pairs: List[str]):
+    def deactivate_trading_pairs(self, trading_pairs: List[str], remove_later = True):
         """xxx"""
-        safe_ensure_future(self.purge_trading_pairs(trading_pairs))
-        for tp in trading_pairs:
-            if tp in self.trading_pairs and tp not in self._trading_pairs_deactivation_timestamp:
-                self._trading_pairs_deactivation_timestamp[tp] = time.time()
-        self.check_remove_trading_pairs()
+        if not remove_later:
+            safe_ensure_future(self.purge_trading_pairs(trading_pairs))
+            tp_copy = self.trading_pairs_copy
+            for tp in trading_pairs:
+                if tp in tp_copy:
+                    tp_copy.remove(tp)
+                if tp in self._trading_pairs_deactivation_timestamp:
+                    self._trading_pairs_deactivation_timestamp.pop(tp)
+            self.trading_pairs = tp_copy
+        else:
+            for tp in trading_pairs:
+                if tp in self.trading_pairs and tp not in self._trading_pairs_deactivation_timestamp:
+                    self._trading_pairs_deactivation_timestamp[tp] = time.time()
+            self.check_remove_trading_pairs()
 
     @abstractmethod
     def supported_order_types(self) -> List[OrderType]:
