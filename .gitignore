@@ -96,12 +96,3 @@ coverage.xml
 .env
 
 **/.claude/settings.local.json
-
-
-
-# temp local test scripts
-/tmp
-# temp local test strategy scripts
-/scripts/funding_rate_arb_v1.py
-/scripts/log_price_example.py
-/scripts/v2_funding_rate_arb_tmp.py
