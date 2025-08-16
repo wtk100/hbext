@@ -57,6 +57,14 @@ class PerpetualTrading:
         """
         return self._funding_info_stream
 
+    def add_trading_pairs(self, trading_pairs: List[str]):
+        self._trading_pairs.extend(trading_pairs)
+    
+    def remove_trading_pairs(self, trading_pairs: List[str]):
+        for tp in trading_pairs:
+            if tp in self._trading_pairs:
+                self._trading_pairs.remove(tp)
+
     def set_position(self, pos_key: str, position: Position):
         self.logger().debug(f"Setting position {pos_key} to {Position}")
         self._account_positions[pos_key] = position
