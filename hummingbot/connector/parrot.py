@@ -62,7 +62,8 @@ async def get_campaign_summary(exchange: str, trading_pairs: List[str] = []) -> 
 
 
 async def get_market_snapshots(market_id: int):
-    async with aiohttp.ClientSession() as client:
+    # 添加trust_env=True，信任环境变量相关代理设置，only for local dev/tst
+    async with aiohttp.ClientSession(trust_env=True) as client:
         url = f"{PARROT_MINER_BASE_URL}charts/market_band?market_id={market_id}&chart_interval=1"
         resp = await client.get(url)
         resp_json = await resp.json()
@@ -80,7 +81,8 @@ async def get_market_last_snapshot(market_id: int):
 
     await asyncio.sleep(0.5)
 
-    async with aiohttp.ClientSession() as client:
+    # 添加trust_env=True，信任环境变量相关代理设置，only for local dev/tst
+    async with aiohttp.ClientSession(trust_env=True) as client:
         url = f"{PARROT_MINER_BASE_URL}user/single_snapshot?market_id={market_id}&timestamp={data[-1]}&aggregate_period=1m"
         resp = await client.get(url)
         resp_json = await resp.json()
@@ -89,7 +91,8 @@ async def get_market_last_snapshot(market_id: int):
 
 async def get_active_campaigns(exchange: str, trading_pairs: List[str] = []) -> Dict[int, CampaignSummary]:
     campaigns = {}
-    async with aiohttp.ClientSession() as client:
+    # 添加trust_env=True，信任环境变量相关代理设置，only for local dev/tst
+    async with aiohttp.ClientSession(trust_env=True) as client:
         campaigns_url = f"{PARROT_MINER_BASE_URL}campaigns"
         resp = await client.get(campaigns_url)
         resp_json = await resp.json()
@@ -117,7 +120,8 @@ async def get_active_campaigns(exchange: str, trading_pairs: List[str] = []) -> 
 
 
 async def get_active_markets(campaigns: Dict[int, CampaignSummary]) -> Dict[int, CampaignSummary]:
-    async with aiohttp.ClientSession() as client:
+    # 添加trust_env=True，信任环境变量相关代理设置，only for local dev/tst
+    async with aiohttp.ClientSession(trust_env=True) as client:
         markets_url = f"{PARROT_MINER_BASE_URL}markets"
         resp = await client.get(markets_url)
         resp_json = await resp.json()

@@ -88,7 +88,8 @@ class GatewayHttpClient:
                                     keyfile=f"{cert_path}/client_key.pem",
                                     password=Security.secrets_manager.password.get_secret_value())
             conn = aiohttp.TCPConnector(ssl_context=ssl_ctx)
-            cls._shared_client = aiohttp.ClientSession(connector=conn)
+            # 添加trust_env=True，信任环境变量相关代理设置，only for local dev/tst
+            cls._shared_client = aiohttp.ClientSession(connector=conn, trust_env=True)
         return cls._shared_client
 
     @classmethod

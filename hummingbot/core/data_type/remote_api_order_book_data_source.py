@@ -1,26 +1,22 @@
 #!/usr/bin/env python
 
 import asyncio
-import aiohttp
 import base64
 import logging
-import pandas as pd
-from typing import (
-    Dict,
-    Optional,
-    Tuple,
-    AsyncIterable
-)
 import pickle
 import time
+from typing import AsyncIterable, Dict, Optional, Tuple
+
+import aiohttp
+import pandas as pd
 import websockets
 from websockets.exceptions import ConnectionClosed
 
 import conf
 from hummingbot.connector.exchange.binance.binance_order_book import BinanceOrderBook
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
-from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.order_book_tracker_entry import OrderBookTrackerEntry
+from hummingbot.logger import HummingbotLogger
 
 
 class RemoteAPIOrderBookDataSource(OrderBookTrackerDataSource):
@@ -53,7 +49,8 @@ class RemoteAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     async def get_client_session(self) -> aiohttp.ClientSession:
         if self._client_session is None:
-            self._client_session = aiohttp.ClientSession()
+            # 添加trust_env=True，信任环境变量相关代理设置，only for local dev/tst
+            self._client_session = aiohttp.ClientSession(trust_env=True)
         return self._client_session
 
     async def get_tracking_pairs(self) -> Dict[str, OrderBookTrackerEntry]:

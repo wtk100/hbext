@@ -44,7 +44,8 @@ class DataFeedBase(NetworkBase):
 
     async def _http_client(self) -> aiohttp.ClientSession:
         if self._shared_client is None:
-            self._shared_client = aiohttp.ClientSession()
+            # 添加trust_env=True，信任环境变量相关代理设置，only for local dev/tst
+            self._shared_client = aiohttp.ClientSession(trust_env=True)
         return self._shared_client
 
     async def get_ready(self):
@@ -65,7 +66,8 @@ class DataFeedBase(NetworkBase):
 
     async def check_network(self) -> NetworkStatus:
         try:
-            async with aiohttp.ClientSession() as session:
+            # 添加trust_env=True，信任环境变量相关代理设置，only for local dev/tst
+            async with aiohttp.ClientSession(trust_env=True) as session:
                 async with session.get(self.health_check_endpoint) as resp:
                     status_text = await resp.text()
                     if resp.status != 200:

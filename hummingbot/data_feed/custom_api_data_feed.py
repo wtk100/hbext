@@ -1,12 +1,14 @@
 import asyncio
-import aiohttp
 import logging
+from decimal import Decimal
 from typing import Optional
+
+import aiohttp
+
 from hummingbot.core.network_base import NetworkBase
 from hummingbot.core.network_iterator import NetworkStatus
-from hummingbot.logger import HummingbotLogger
 from hummingbot.core.utils.async_utils import safe_ensure_future
-from decimal import Decimal
+from hummingbot.logger import HummingbotLogger
 
 
 class CustomAPIDataFeed(NetworkBase):
@@ -39,7 +41,8 @@ class CustomAPIDataFeed(NetworkBase):
 
     def _http_client(self) -> aiohttp.ClientSession:
         if self._shared_client is None:
-            self._shared_client = aiohttp.ClientSession()
+            # 添加trust_env=True，信任环境变量相关代理设置，only for local dev/tst
+            self._shared_client = aiohttp.ClientSession(trust_env=True)
         return self._shared_client
 
     async def check_network(self) -> NetworkStatus:
