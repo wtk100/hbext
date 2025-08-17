@@ -12,7 +12,7 @@ from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_data_types import BaseClientModel
 from hummingbot.client.config.config_helpers import ClientConfigAdapter, get_strategy_starter_file
 from hummingbot.client.config.strategy_config_data_types import BaseStrategyConfigMap
-from hummingbot.client.settings import SCRIPT_STRATEGIES_MODULE, STRATEGIES
+from hummingbot.client.settings import SCRIPT_STRATEGIES_MODULE, SCRIPT_STRATEGIES_PATH, STRATEGIES
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.connector.markets_recorder import MarketsRecorder
 from hummingbot.core.clock import Clock, ClockMode
@@ -79,8 +79,8 @@ class TradingCore:
             self.client_config_map = client_config
 
         # Strategy paths
-        self.scripts_path = scripts_path or Path("scripts")
-
+        # self.scripts_path = scripts_path or Path("scripts")
+        self.scripts_path = scripts_path or SCRIPT_STRATEGIES_PATH
         # Core components
         self.connector_manager = ConnectorManager(self.client_config_map)
         self.clock: Optional[Clock] = None
