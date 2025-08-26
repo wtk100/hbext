@@ -3,7 +3,7 @@
 # 相比基类OrderBookTrackerDataSource，新增：
 # 1. 从WS监听funding_info消息.
 # 2. 获取和存储funding_info的消息队列.
-# 注: 无与self._trading_pairs相关的操作.
+# 注：此类无与self._trading_pairs相关的交易所互动.
 #########################################################################################################################################
 import asyncio
 from abc import ABC, abstractmethod
@@ -29,6 +29,7 @@ class PerpetualAPIOrderBookDataSource(OrderBookTrackerDataSource, ABC):
     async def listen_for_funding_info(self, output: asyncio.Queue):
         """
         Reads the funding info events queue and updates the local funding info information.
+        注意: 父类定义的snapshot/diff/trade消息的listen方法由OrderBookTracker启动, 而本方法是由PerpetualDerivativePyBase启动
         """
         message_queue = self._message_queue[self._funding_info_messages_queue_key]
         while True:

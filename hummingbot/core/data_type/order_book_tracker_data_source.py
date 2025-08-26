@@ -129,7 +129,7 @@ class OrderBookTrackerDataSource(metaclass=ABCMeta):
         output queue.
         This method also request the full order book content from the exchange using HTTP requests if it does not
         receive events during one hour.
-        注: 某些交易所重载了此方法, 不一定优先用WS超时再用API, 如Binance直接用API.
+        注: 某些交易所重载了此方法, 不一定优先用WS超时再用API, 如Binance Perpetual直接用API.
 
         :param ev_loop: the event loop the method will run in
         :param output: a queue to add the created snapshot messages

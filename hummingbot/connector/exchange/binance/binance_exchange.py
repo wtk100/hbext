@@ -1,3 +1,8 @@
+############################################################################################################################
+# 此类Binance永续合约交易所对象要实现的方法，在基类ExchangePyBase基础上：
+# 1. 增加...
+# 注:self._trading_pairs仅用于_update_order_fills_from_trades.
+############################################################################################################################
 import asyncio
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple

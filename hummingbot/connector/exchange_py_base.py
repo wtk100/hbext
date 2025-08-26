@@ -7,9 +7,11 @@
 # 4. 实现start_network/stop_network方法，内含启停以下更新的跟踪：order book/trading rules/trading fees/status(含服务器时间、账户余额、
 #    订单状态)/user stream/lost orders update (除status update polling依赖event驱动外其他都是直接循环, order book tracking).
 # 5. 实现各种订单操作包括buy/sell/cancel/getfee并跟踪订单(并定义虚方法_place_cancel/_place_order/_get_fee，由具体交易所类实现).
-# 注:尚未定义self._trading_pairs, 但定义了虚属性trading_pairs，仅用于OrderBookTrackerDataSource、OrderBookTracker初始化. 因此
-#    需要确保当self._trading_pairs为空或变动时，OrderBookTrackerDataSource及其子类、OrderBookTracker利用self._trading_pairs与
-#    交易所的交互具有对应的处理.
+# 注: a.尚未定义self._trading_pairs, 但定义了虚属性trading_pairs，仅用于OrderBookTrackerDataSource、OrderBookTracker初始化. 因此
+#       需要确保当self._trading_pairs为空或变动时，OrderBookTrackerDataSource及其子类、OrderBookTracker利用self._trading_pairs与
+#       交易所的交互具有对应的处理；
+#     b.ready属性用于检查交易所连接交互是否全部ready，子类PerpetualDerivativePyBase在status_dict中加入了所有币对的funding info
+#       是否初始化的检查；与order_books_initialized一样受self._trading_pairs变动的影响，变动后使用端应当重新检查此类的ready属性.
 ################################################################################################################################
 import asyncio
 import copy

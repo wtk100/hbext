@@ -1,6 +1,6 @@
 #########################################################################################################################################
 # 注：与self._trading_pairs相关交易所互动有：
-#   _subscribe_channels: 用于订阅WS Channels，self._trading_pairs若为空会报错；若变动需处理subscribe/unsubscribe.
+#   _subscribe_channels: 用于订阅WS Channels，self._trading_pairs若为空报错；若变动需处理subscribe/unsubscribe.
 #   listen_for_order_book_snapshots: 用于API请求获取orde book snapshot; self._trading_pairs若为空若变动均无影响.
 #   _parse_funding_info_message: 用于判断funding info的WS消息是否需要处理; self._trading_pairs若为空若变动均无影响.
 #########################################################################################################################################

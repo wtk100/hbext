@@ -1,3 +1,7 @@
+#########################################################################################################################################
+# 注：与self._trading_pairs相关交易所互动有：
+#   _subscribe_channels: 用于订阅WS Channels，self._trading_pairs若为空需报错；若变动需处理subscribe/unsubscribe.
+#########################################################################################################################################
 import asyncio
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
