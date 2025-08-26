@@ -32,6 +32,14 @@ class OrderBookTrackerDataSource(metaclass=ABCMeta):
         return cls._logger
 
     @property
+    def trading_pairs(self) -> List[str]:
+        return self._trading_pairs
+
+    @trading_pairs.setter
+    def trading_pairs(self, trading_pairs: List[str]):
+        self._trading_pairs = trading_pairs
+
+    @property
     def order_book_create_function(self) -> Callable[[], OrderBook]:
         return self._order_book_create_function
 

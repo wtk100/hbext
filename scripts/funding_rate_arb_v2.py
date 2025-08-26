@@ -22,7 +22,7 @@ class FundingRateArbitrage(ScriptStrategyBase):
         super().__init__(connectors, config)
         self._hb_app = HummingbotApplication.main_application()
         self._trading_core = self._hb_app.trading_core
-        self._ticked_seconds = 0
+        self._ticks = 0
 
     def _add_exchange(self, ex_name: str, trading_pairs: List[str] = ["BTC-USDT"]):
         exchange = self._trading_core.create_connector(ex_name, trading_pairs)
@@ -69,33 +69,24 @@ class FundingRateArbitrage(ScriptStrategyBase):
             self._remove_exchange(ex_name)
 
     def on_tick(self):
+        for connector_name, connector in self.connectors.items():
+            self.logger().info(f"{connector_name} ticked.| " +
+                               "| ".join([f"{tp}: {connector.get_mid_price(tp)}" for tp in connector.trading_pairs]))
+
         market_options = [
-            ("binance_perpetual", ["BTC-USDT"]),
-            ("binance_perpetual", ["XRP-USDT"]),
-            ("okx_perpetual", ["XRP-USDT"]),
-            ("binance_perpetual", ["LTC-USDT"]),
-            ("okx_perpetual", ["SOL-USDT"]),
-            ("okx_perpetual", ["ETH-USDT"]),
-            ("binance_perpetual", ["SOL-USDT"]),
-            ("binance_perpetual", ["ETH-USDT"]),
+            # ("binance_perpetual", ["BTC-USDT"]),
+            ("okx_perpetual", ["ETH-USDT", "XRP-USDT", "SOL-USDT"]),
+            ("okx_perpetual", ["BTC-USDT", "LTC-USDT"]),
         ]
-        self._ticked_seconds += 1
-        if self._ticked_seconds % 70 == 0:
-            ex_name, trading_pairs = market_options[self._ticked_seconds // 70 - 1]
+        self._ticks += 1
+        if self._ticks % 30 == 0 and self._ticks // 30 <= len(market_options):
+            ex_name, trading_pairs = market_options[self._ticks // 30 - 1]
             self.logger().info(f"Switching to {ex_name} and {trading_pairs}...")
-            self.logger().info(f"Activating {ex_name}...")
+            self.logger().info(f"Activating {ex_name} and {trading_pairs}...")
             self._activate_market(ex_name, trading_pairs)
+            self.ready_to_trade = False
             for ex_name_existing in FundingRateArbitrage.markets.keys():
                 if ex_name_existing != ex_name:
-                    self.logger().info(f"Deactivating {ex_name_existing}...")
+                    self.logger().info(f"Deactivating {ex_name_existing} and {trading_pairs}...")
                     self._deactivate_market(ex_name_existing)
-        if self._ticked_seconds == self._ticked_seconds // 70 * 10 + 5:
-            self.logger().info(self._trading_core.connector_manager.get_status())
-
-        for connector_name, connector in self.connectors.items():
-            info = f"Connector {connector_name} - traing_pairs: " + \
-                ",".join([f"{tp}: {connector.get_mid_price(tp)}" for tp in connector.trading_pairs])
-            self.logger().info(info)
-
-    # async def on_stop(self):
-    #     pass
+        #     self.logger().info(self._trading_core.connector_manager.get_status())

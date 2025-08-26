@@ -42,7 +42,7 @@ class ExchangePyBase(ExchangeBase, ABC):
     _logger = None
 
     SHORT_POLL_INTERVAL = 5.0
-    LONG_POLL_INTERVAL = 120.0
+    LONG_POLL_INTERVAL = 10.0  # tmp testing...
     TRADING_RULES_INTERVAL = 30 * MINUTE
     TRADING_FEES_INTERVAL = TWELVE_HOURS
     TICK_INTERVAL_LIMIT = 60.0
@@ -86,6 +86,15 @@ class ExchangePyBase(ExchangeBase, ABC):
         self._order_tracker: ClientOrderTracker = self._create_order_tracker()
 
         self._trading_pairs_deactivation_timestamp: Dict[str, float] = {}
+        self._test_tmp_variable: int = 0
+
+    @property
+    def test_tmp_variable(self) -> int:
+        return self._test_tmp_variable
+
+    @test_tmp_variable.setter
+    def test_tmp_variable(self, v: int):
+        self._test_tmp_variable = v
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -144,7 +153,7 @@ class ExchangePyBase(ExchangeBase, ABC):
         raise NotImplementedError
 
     @trading_pairs.setter
-    def trading_pairs(self, trading_pairs: List[str]) -> List[str]:
+    def trading_pairs(self, trading_pairs: List[str]):
         raise NotImplementedError
 
     @property
@@ -207,6 +216,36 @@ class ExchangePyBase(ExchangeBase, ABC):
         """
         return {key: value.to_json() for key, value in self._order_tracker.all_updatable_orders.items()}
 
+    def update_trading_pairs(self, trading_pairs: List[str]):
+        """xxx"""
+        tp_copy = self.trading_pairs_copy
+        tpdt = copy.deepcopy(self._trading_pairs_deactivation_timestamp)
+        new_tps = set(trading_pairs) - set(tp_copy)
+        removing_tps = set(tp_copy) - set(trading_pairs)
+        if new_tps and len(new_tps) > 0:
+            tp_copy.extend(new_tps)
+        for tp in set(trading_pairs):
+            if tp in tpdt:
+                tpdt.pop(tp)
+        if removing_tps and len(removing_tps) > 0:
+            for tp in removing_tps:
+                if tp not in tpdt:
+                    tpdt[tp] = time.time()
+
+        tpdt_copy = tpdt.copy()
+        for tp, ts in tpdt.items():
+            if time.time() - ts > 30:
+                tp_copy.remove(tp)
+                tpdt_copy.pop(tp)
+
+        if set(self.trading_pairs) != set(tp_copy):
+            self.trading_pairs = tp_copy
+            self.order_book_tracker.stop()
+            self.order_book_tracker.trading_pairs = tp_copy
+            self.order_book_tracker.start()
+        if set(self._trading_pairs_deactivation_timestamp.keys()) != set(tpdt_copy.keys()):
+            self._trading_pairs_deactivation_timestamp = tpdt_copy
+
     # @abstractmethod
     # async def initialize_trading_pairs(self, trading_pairs: List[str]):
     #     """xxx"""
@@ -217,49 +256,49 @@ class ExchangePyBase(ExchangeBase, ABC):
     #     """xxx"""
     #     raise NotImplementedError
 
-    def check_remove_trading_pairs(self):
-        """xxx"""
-        tp_copy = self.trading_pairs_copy
-        tpdt = copy.deepcopy(self._trading_pairs_deactivation_timestamp)
-        tp_to_remove = []
-        for tp, ts in self._trading_pairs_deactivation_timestamp.items():
-            if time.time() - ts > self.TRADING_PAIR_EXTRA_RETENTION_PERIOD:
-                tp_copy.remove(tp)
-                tpdt.pop(tp)
-                tp_to_remove.extend(tp)
-        safe_ensure_future(self.purge_trading_pairs(tp_to_remove))
-        self._trading_pairs_deactivation_timestamp = tpdt
-        self.trading_pairs = tp_copy
+    # def check_remove_trading_pairs(self):
+    #     """xxx"""
+    #     tp_copy = self.trading_pairs_copy
+    #     tpdt = copy.deepcopy(self._trading_pairs_deactivation_timestamp)
+    #     tp_to_remove = []
+    #     for tp, ts in self._trading_pairs_deactivation_timestamp.items():
+    #         if time.time() - ts > self.TRADING_PAIR_EXTRA_RETENTION_PERIOD:
+    #             tp_copy.remove(tp)
+    #             tpdt.pop(tp)
+    #             tp_to_remove.extend(tp)
+    #     safe_ensure_future(self.purge_trading_pairs(tp_to_remove))
+    #     self._trading_pairs_deactivation_timestamp = tpdt
+    #     self.trading_pairs = tp_copy
 
-    def activate_trading_pairs(self, trading_pairs: List[str]):
-        """xxx"""
-        new_trading_pairs = [tp for tp in trading_pairs if tp not in self.trading_pairs]
-        if new_trading_pairs and len(new_trading_pairs) > 0:
-            safe_ensure_future(self.initialize_trading_pairs(new_trading_pairs))
-            tp_copy = self.trading_pairs_copy
-            tp_copy.extend(new_trading_pairs)
-            self.trading_pairs = tp_copy
-            for tp in self.trading_pairs:
-                if tp in self._trading_pairs_deactivation_timestamp:
-                    self._trading_pairs_deactivation_timestamp.pop(tp)
-            self.check_remove_trading_pairs()
+    # def activate_trading_pairs(self, trading_pairs: List[str]):
+    #     """xxx"""
+    #     new_trading_pairs = [tp for tp in trading_pairs if tp not in self.trading_pairs]
+    #     if new_trading_pairs and len(new_trading_pairs) > 0:
+    #         safe_ensure_future(self.initialize_trading_pairs(new_trading_pairs))
+    #         tp_copy = self.trading_pairs_copy
+    #         tp_copy.extend(new_trading_pairs)
+    #         self.trading_pairs = tp_copy
+    #         for tp in self.trading_pairs:
+    #             if tp in self._trading_pairs_deactivation_timestamp:
+    #                 self._trading_pairs_deactivation_timestamp.pop(tp)
+    #         self.check_remove_trading_pairs()
 
-    def deactivate_trading_pairs(self, trading_pairs: List[str], remove_later = True):
-        """xxx"""
-        if not remove_later:
-            safe_ensure_future(self.purge_trading_pairs(trading_pairs))
-            tp_copy = self.trading_pairs_copy
-            for tp in trading_pairs:
-                if tp in tp_copy:
-                    tp_copy.remove(tp)
-                if tp in self._trading_pairs_deactivation_timestamp:
-                    self._trading_pairs_deactivation_timestamp.pop(tp)
-            self.trading_pairs = tp_copy
-        else:
-            for tp in trading_pairs:
-                if tp in self.trading_pairs and tp not in self._trading_pairs_deactivation_timestamp:
-                    self._trading_pairs_deactivation_timestamp[tp] = time.time()
-            self.check_remove_trading_pairs()
+    # def deactivate_trading_pairs(self, trading_pairs: List[str], remove_later = True):
+    #     """xxx"""
+    #     if not remove_later:
+    #         safe_ensure_future(self.purge_trading_pairs(trading_pairs))
+    #         tp_copy = self.trading_pairs_copy
+    #         for tp in trading_pairs:
+    #             if tp in tp_copy:
+    #                 tp_copy.remove(tp)
+    #             if tp in self._trading_pairs_deactivation_timestamp:
+    #                 self._trading_pairs_deactivation_timestamp.pop(tp)
+    #         self.trading_pairs = tp_copy
+    #     else:
+    #         for tp in trading_pairs:
+    #             if tp in self.trading_pairs and tp not in self._trading_pairs_deactivation_timestamp:
+    #                 self._trading_pairs_deactivation_timestamp[tp] = time.time()
+    #         self.check_remove_trading_pairs()
 
     @abstractmethod
     def supported_order_types(self) -> List[OrderType]:

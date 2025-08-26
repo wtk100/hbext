@@ -93,6 +93,10 @@ class OkxExchange(ExchangePyBase):
     def trading_pairs(self):
         return self._trading_pairs
 
+    @trading_pairs.setter
+    def trading_pairs(self, trading_pairs: List[str]):
+        self._trading_pairs = trading_pairs
+
     @property
     def is_cancel_request_in_exchange_synchronous(self) -> bool:
         return False

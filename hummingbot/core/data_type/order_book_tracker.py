@@ -57,6 +57,15 @@ class OrderBookTracker:
         self._order_book_stream_listener_task: Optional[asyncio.Task] = None
 
     @property
+    def trading_pairs(self) -> List[str]:
+        return self._trading_pairs
+
+    @trading_pairs.setter
+    def trading_pairs(self, trading_pairs: List[str]):
+        self._trading_pairs = trading_pairs
+        self._data_source.trading_pairs = trading_pairs
+
+    @property
     def data_source(self) -> OrderBookTrackerDataSource:
         return self._data_source
 
@@ -182,7 +191,7 @@ class OrderBookTracker:
             self._tracking_tasks[trading_pair] = safe_ensure_future(self._track_single_book(trading_pair))
             self.logger().info(f"Initialized order book for {trading_pair}. "
                                f"{index + 1}/{len(self._trading_pairs)} completed.")
-            await self._sleep(delay=1)
+            await self._sleep(delay=0.1)
         self._order_books_initialized.set()
 
     async def _order_book_diff_router(self):

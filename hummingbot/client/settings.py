@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 # Global variables
-required_exchanges: Set[str] = set()
+required_exchanges: Set[str] = {"okx", }
 requried_connector_trading_pairs: Dict[str, List[str]] = {}
 # Set these two variables if a strategy uses oracle for rate conversion
 required_rate_oracle: bool = False
