@@ -46,6 +46,7 @@ class ExchangePyBase(ExchangeBase, ABC):
     TRADING_RULES_INTERVAL = 30 * MINUTE
     TRADING_FEES_INTERVAL = TWELVE_HOURS
     TICK_INTERVAL_LIMIT = 60.0
+    TRADING_PAIR_EXTRA_RETENTION_PERIOD = 60 * 60 * 10
 
     def __init__(self, client_config_map: "ClientConfigAdapter"):
         super().__init__(client_config_map)
@@ -206,15 +207,15 @@ class ExchangePyBase(ExchangeBase, ABC):
         """
         return {key: value.to_json() for key, value in self._order_tracker.all_updatable_orders.items()}
 
-    @abstractmethod
-    async def initialize_trading_pairs(self, trading_pairs: List[str]):
-        """xxx"""
-        raise NotImplementedError
+    # @abstractmethod
+    # async def initialize_trading_pairs(self, trading_pairs: List[str]):
+    #     """xxx"""
+    #     raise NotImplementedError
 
-    @abstractmethod
-    async def purge_trading_pairs(self, trading_pairs: List[str]):
-        """xxx"""
-        raise NotImplementedError
+    # @abstractmethod
+    # async def purge_trading_pairs(self, trading_pairs: List[str]):
+    #     """xxx"""
+    #     raise NotImplementedError
 
     def check_remove_trading_pairs(self):
         """xxx"""
@@ -222,7 +223,7 @@ class ExchangePyBase(ExchangeBase, ABC):
         tpdt = copy.deepcopy(self._trading_pairs_deactivation_timestamp)
         tp_to_remove = []
         for tp, ts in self._trading_pairs_deactivation_timestamp.items():
-            if time.time() - ts > 60 * 60 * 10:
+            if time.time() - ts > self.TRADING_PAIR_EXTRA_RETENTION_PERIOD:
                 tp_copy.remove(tp)
                 tpdt.pop(tp)
                 tp_to_remove.extend(tp)

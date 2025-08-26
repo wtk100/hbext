@@ -57,10 +57,17 @@ class PerpetualTrading:
         """
         return self._funding_info_stream
 
+    @property
+    def trading_pairs(self) -> List[str]:
+        """xxx"""
+        return copy.deepcopy(self._trading_pairs)
+
     def add_trading_pairs(self, trading_pairs: List[str]):
+        """xxx"""
         self._trading_pairs.extend(trading_pairs)
-    
+
     def remove_trading_pairs(self, trading_pairs: List[str]):
+        """xxx"""
         for tp in trading_pairs:
             if tp in self._trading_pairs:
                 self._trading_pairs.remove(tp)
