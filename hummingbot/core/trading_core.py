@@ -271,8 +271,8 @@ class TradingCore:
     def detect_strategy_type(self, strategy_name: str) -> StrategyType:
         """
         Detect the type of strategy.
-        如果策略的py文件在/scripts目录下, 如果是StrategyV2Base子类则为V2策略, 否则为一般script策略
-        如果是/hummingbot/strategy目录下的子目录, 则为传统策略
+        如果策略的py文件在/scripts目录下, 如果是StrategyV2Base子类则为V2策略, 否则为一般script策略脚本
+        如果是/hummingbot/strategy目录下的子目录, 则为传统策略脚本
         """
         if self.is_script_strategy(strategy_name):
             # Check if it's a V2 strategy by examining the script
