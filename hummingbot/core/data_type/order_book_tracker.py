@@ -45,17 +45,33 @@ class OrderBookTracker:
         self._domain: Optional[str] = domain
         self._data_source: OrderBookTrackerDataSource = data_source
         self._trading_pairs: List[str] = trading_pairs
+        # 用于异步标记所有订单簿是否初始化完成，并用于外部(交易所)检查ready状态
         self._order_books_initialized: asyncio.Event = asyncio.Event()
+        # 用_track_single_book方法从币对消息队列_tracking_message_queues/_saved_message_queues中
+        # 获取单个币对的消息并更新其订单簿的Tasks，一个币对一个
         self._tracking_tasks: Dict[str, asyncio.Task] = {}
+        # 币对订单簿，一个币对一个
         self._order_books: Dict[str, OrderBook] = {}
+        # 用于存放每个币对的diff/snapshot消息，由_order_book_diff_router/_order_book_snapshot_router方法存放，
+        # 由_track_single_book取出并处理到订单簿中，一个币对一个
         self._tracking_message_queues: Dict[str, asyncio.Queue] = {}
+        # _track_single_book一边处理diff消息一边放进币对对应的此队列中，用于后续获取到snapshot后将比其更新的diff
+        # 消息应用到snapshot上，一个币对一个
         self._past_diffs_windows: Dict[str, Deque] = defaultdict(lambda: deque(maxlen=self.PAST_DIFF_WINDOW_SIZE))
+        # 用于存放所有incoming的diff消息，由data_source存放，由_order_book_diff_router取出并放到
+        # _tracking_message_queues中每个币对对应的消息队列中
         self._order_book_diff_stream: asyncio.Queue = asyncio.Queue()
+        # 用于存放所有incoming的snapshot消息，由data_source存放，由_order_book_snapshot_router取出并放到
+        # _tracking_message_queues中每个币对对应的消息队列中
         self._order_book_snapshot_stream: asyncio.Queue = asyncio.Queue()
+        # 用于存放所有incoming的trade消息，由data_source存放，由_emit_trade_event_loop取出并处理到订单簿中
         self._order_book_trade_stream: asyncio.Queue = asyncio.Queue()
         self._ev_loop: asyncio.BaseEventLoop = asyncio.get_event_loop()
+        # 当初始化未完成时，若已经开始收到diff消息，_order_book_diff_router先将消息存放到此队列，
+        # 待初始化完成后，由_track_single_book取出并处理到订单簿中，一个币对一个
         self._saved_message_queues: Dict[str, Deque[OrderBookMessage]] = defaultdict(lambda: deque(maxlen=1000))
 
+        # 以下均为start方法中，异步调用对应方法的Tasks，用于stop时cancel
         self._emit_trade_event_task: Optional[asyncio.Task] = None
         self._init_order_books_task: Optional[asyncio.Task] = None
         self._order_book_diff_listener_task: Optional[asyncio.Task] = None
@@ -88,12 +104,22 @@ class OrderBookTracker:
     def start(self):
         self.stop()
         self._init_order_books_task = safe_ensure_future(
+            # 1. 用data_source调API初始化订单簿并放进self._order_books.
+            # 2. 初始化每个币对的MQ并放进self._tracking_message_queues.
+            # 3. 启动跟踪每个币对diff/snapshot消息并处理到订单簿中的循环任务并把任务(调_track_single_book)放进self._tracking_tasks.
             self._init_order_books()
         )
         self._emit_trade_event_task = safe_ensure_future(
+            # 启动从_order_book_trade_stream取出所有incoming的trade消息并处理到订单簿中的循环任务
             self._emit_trade_event_loop()
         )
-        # 注意以下4个call是启动OrderBookTrackerDataSource的4个listen方法
+        # 以下4个call启动data_source的4个listen循环任务方法:
+        # listen_for_subscriptions: 订阅WS消息，判断WS消息类别并分别放到data_source的4个消息队列中(snapshot, diff, trade, fundinginfo)
+        # listen_for_order_book_diffs: 从data_source的diff消息队列取出消息、解析、放到此类的_order_book_diff_stream队列中
+        # listen_for_order_book_snapshots: 从data_source的snapshot消息队列取出消息、解析、放到此类的_order_book_snapshot_stream队列中
+        # listen_for_trades: 从data_source的trade消息队列取出消息、解析、放到此类的_order_book_trade_stream队列中
+        # 注意：相比OrderBookTrackerDataSource，PerpetualAPIOrderBookDataSource及其子类新增了listen_for_funding_info方法，
+        #      但此类并未调用listen_for_funding_info，而是由PerpetualDerivativePyBase调用, stream队列在其成员PerpetualTrading类中.
         self._order_book_diff_listener_task = safe_ensure_future(
             self._data_source.listen_for_order_book_diffs(self._ev_loop, self._order_book_diff_stream)
         )
@@ -107,12 +133,15 @@ class OrderBookTracker:
             self._data_source.listen_for_subscriptions()
         )
         self._order_book_diff_router_task = safe_ensure_future(
+            # 启动从_order_book_diff_stream队列获取diff消息并分币对放到_tracking_message_queues/_saved_message_queues的循环任务
             self._order_book_diff_router()
         )
         self._order_book_snapshot_router_task = safe_ensure_future(
+            # 启动从_order_book_snapshot_stream队列获取snapshot消息并分币对放到_tracking_message_queues的循环任务
             self._order_book_snapshot_router()
         )
         self._update_last_trade_prices_task = safe_ensure_future(
+            # 启动在初始化完成后, 持续检查, 如果WS更新trade不及时, 就通过交易所类用API获取最新trade并处理到订单簿中的循环任务
             self._update_last_trade_prices_loop()
         )
 
@@ -157,7 +186,7 @@ class OrderBookTracker:
         '''
         Updates last trade price for all order books through REST API, it is to initiate last_trade_price and as
         fall-back mechanism for when the web socket update channel fails.
-        由start开启: Order book初始化完成后, 直接开始循环检查, 如果WS更新不及时, 就通过交易所类用API获取有order book的币对的最新
+        由start开启: Order book初始化完成后, 直接开始循环检查, 如果WS更新trade不及时, 就通过交易所类用API获取有order book的币对的最新
         交易价格并更新到其对应的order book对象中.
         '''
         await self._order_books_initialized.wait()
